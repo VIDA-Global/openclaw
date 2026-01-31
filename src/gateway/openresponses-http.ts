@@ -398,6 +398,7 @@ export async function handleOpenResponsesHttpRequest(
   const user = payload.user;
   const toolResultMaxDataBytes = opts.config?.toolResultMaxDataBytes;
   const reasoningLevel = payload.reasoning ? "stream" : undefined;
+  const reasoningSummary = payload.reasoning?.summary ? true : false;
 
   // Extract images + files from input (Phase 2)
   let images: ImageContent[] = [];
@@ -607,7 +608,7 @@ export async function handleOpenResponsesHttpRequest(
     const item: Extract<OutputItem, { type: "reasoning" }> = {
       type: "reasoning",
       id: `reason_${randomUUID()}`,
-      content: text,
+      ...(reasoningSummary ? { summary: text } : { content: text }),
     };
     const index = appendOutputItem(item);
     if (stream) {
