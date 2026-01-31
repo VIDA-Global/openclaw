@@ -235,6 +235,8 @@ Defaults can be tuned under `gateway.http.endpoints.responses`:
             maxRedirects: 3,
             timeoutMs: 10000,
           },
+          // Optional: include base64 tool-result data up to this many decoded bytes.
+          toolResultMaxDataBytes: 1048576,
         },
       },
     },
@@ -256,6 +258,7 @@ Defaults when omitted:
 - `images.maxBytes`: 10MB
 - `images.maxRedirects`: 3
 - `images.timeoutMs`: 10s
+- `toolResultMaxDataBytes`: unset (tool result data stripped)
 
 Security note:
 
@@ -284,6 +287,10 @@ Event types currently emitted:
 - `response.output_item.done`
 - `response.completed`
 - `response.failed` (on error)
+
+Tool calls and internal tool results are emitted as `response.output_item.added`/`done`
+items with `type: "function_call"` and `type: "function_call_output"`. If reasoning
+streaming is enabled, `type: "reasoning"` output items are emitted as they arrive.
 
 ## Usage
 
