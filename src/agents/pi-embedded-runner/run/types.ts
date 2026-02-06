@@ -82,6 +82,8 @@ export type EmbeddedRunAttemptParams = {
   onReasoningStream?: (payload: { text?: string; mediaUrls?: string[] }) => void | Promise<void>;
   onToolResult?: (payload: { text?: string; mediaUrls?: string[] }) => void | Promise<void>;
   onAgentEvent?: (evt: { stream: string; data: Record<string, unknown> }) => void;
+  /** Optional provider-specific metadata passed through integrations (e.g. OpenResponses). */
+  providerMetadata?: Record<string, unknown>;
   /** Require explicit message tool targets (no implicit last-route sends). */
   requireExplicitMessageTarget?: boolean;
   /** If true, omit the message tool from the tool list. */

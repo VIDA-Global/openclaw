@@ -426,6 +426,7 @@ export async function runEmbeddedAttempt(
         agentId: sessionAgentId,
         sessionKey: params.sessionKey,
         allowSyntheticToolResults: transcriptPolicy.allowSyntheticToolResults,
+        providerMetadata: params.providerMetadata,
       });
       trackSessionManagerAccess(params.sessionFile);
 

@@ -451,6 +451,7 @@ export async function agentCommand(
             runId,
             lane: opts.lane,
             abortSignal: opts.abortSignal,
+            providerMetadata: opts.providerMetadata,
             extraSystemPrompt: opts.extraSystemPrompt,
             streamParams: opts.streamParams,
             toolResultMaxDataBytes: opts.toolResultMaxDataBytes,

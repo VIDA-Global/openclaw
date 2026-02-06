@@ -99,6 +99,8 @@ export type RunEmbeddedPiAgentParams = {
   onAgentEvent?: (evt: { stream: string; data: Record<string, unknown> }) => void;
   lane?: string;
   enqueue?: typeof enqueueCommand;
+  /** Optional provider-specific metadata passed through integrations (e.g. OpenResponses). */
+  providerMetadata?: Record<string, unknown>;
   extraSystemPrompt?: string;
   streamParams?: AgentStreamParams;
   ownerNumbers?: string[];
