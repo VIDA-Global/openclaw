@@ -119,6 +119,45 @@ describe("CronService", () => {
     await store.cleanup();
   });
 
+  it("auto-runs recurring jobs when timer force-reloads store", async () => {
+    const store = await makeStorePath();
+    const enqueueSystemEvent = vi.fn();
+    const requestHeartbeatNow = vi.fn();
+
+    const cron = new CronService({
+      storePath: store.storePath,
+      cronEnabled: true,
+      log: noopLogger,
+      enqueueSystemEvent,
+      requestHeartbeatNow,
+      runIsolatedAgentJob: vi.fn(async () => ({ status: "ok" })),
+    });
+
+    await cron.start();
+    const job = await cron.add({
+      name: "recurring tick",
+      enabled: true,
+      schedule: { kind: "every", everyMs: 1_000 },
+      sessionTarget: "main",
+      wakeMode: "next-heartbeat",
+      payload: { kind: "systemEvent", text: "tick" },
+    });
+
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(enqueueSystemEvent).toHaveBeenCalledWith("tick", {
+      agentId: undefined,
+    });
+    expect(requestHeartbeatNow).toHaveBeenCalled();
+    const jobs = await cron.list({ includeDisabled: true });
+    const updated = jobs.find((entry) => entry.id === job.id);
+    expect(updated?.state.lastStatus).toBe("ok");
+    expect(updated?.state.nextRunAtMs).toBeGreaterThan(updated?.state.lastRunAtMs ?? 0);
+
+    cron.stop();
+    await store.cleanup();
+  });
+
   it("wakeMode now waits for heartbeat completion when available", async () => {
     const store = await makeStorePath();
     const enqueueSystemEvent = vi.fn();

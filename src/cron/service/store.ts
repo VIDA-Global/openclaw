@@ -126,6 +126,14 @@ async function getFileMtimeMs(path: string): Promise<number | null> {
   }
 }
 
+function scheduleSignature(raw: unknown) {
+  try {
+    return JSON.stringify(raw ?? null);
+  } catch {
+    return "";
+  }
+}
+
 export async function ensureLoaded(state: CronServiceState, opts?: { forceReload?: boolean }) {
   // Fast path: store is already in memory. Other callers (add, list, run, …)
   // trust the in-memory copy to avoid a stat syscall on every operation.
@@ -135,6 +143,10 @@ export async function ensureLoaded(state: CronServiceState, opts?: { forceReload
   // Force reload always re-reads the file to avoid missing cross-service
   // edits on filesystems with coarse mtime resolution.
 
+  const previousById =
+    opts?.forceReload && state.store
+      ? new Map(state.store.jobs.map((job) => [job.id, job] as const))
+      : null;
   const fileMtimeMs = await getFileMtimeMs(state.deps.storePath);
   const loaded = await loadCronStore(state.deps.storePath);
   const jobs = (loaded.jobs ?? []) as unknown as Array<Record<string, unknown>>;
@@ -252,11 +264,34 @@ export async function ensureLoaded(state: CronServiceState, opts?: { forceReload
     }
   }
   state.store = { version: 1, jobs: jobs as unknown as CronJob[] };
+  if (previousById) {
+    for (const job of state.store.jobs) {
+      const previous = previousById.get(job.id);
+      if (!previous) {
+        continue;
+      }
+      const sameEnabled = previous.enabled === job.enabled;
+      const sameSchedule = scheduleSignature(previous.schedule) === scheduleSignature(job.schedule);
+      if (!sameEnabled || !sameSchedule) {
+        // Force recompute for externally edited jobs.
+        job.state.nextRunAtMs = undefined;
+        continue;
+      }
+      if (
+        typeof job.state.nextRunAtMs !== "number" &&
+        typeof previous.state.nextRunAtMs === "number" &&
+        Number.isFinite(previous.state.nextRunAtMs)
+      ) {
+        // Preserve prior scheduler slot if a cross-service write omitted state.
+        job.state.nextRunAtMs = previous.state.nextRunAtMs;
+      }
+    }
+  }
   state.storeLoadedAtMs = state.deps.nowMs();
   state.storeFileMtimeMs = fileMtimeMs;
 
   // Recompute next runs after loading to ensure accuracy
-  recomputeNextRuns(state);
+  recomputeNextRuns(state, { preserveScheduledState: opts?.forceReload === true });
 
   if (mutated) {
     await persist(state);
