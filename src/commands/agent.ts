@@ -222,11 +222,7 @@ export async function agentCommand(
         sessionEntry ?? { sessionId, updatedAt: Date.now() };
       const next: SessionEntry = { ...entry, sessionId, updatedAt: Date.now() };
       if (thinkOverride) {
-        if (thinkOverride === "off") {
-          delete next.thinkingLevel;
-        } else {
-          next.thinkingLevel = thinkOverride;
-        }
+        next.thinkingLevel = thinkOverride;
       }
       applyVerboseOverride(next, verboseOverride);
       sessionStore[sessionKey] = next;
@@ -455,6 +451,7 @@ export async function agentCommand(
             abortSignal: opts.abortSignal,
             providerMetadata: opts.providerMetadata,
             extraSystemPrompt: opts.extraSystemPrompt,
+            inputProvenance: opts.inputProvenance,
             streamParams: opts.streamParams,
             toolResultMaxDataBytes: opts.toolResultMaxDataBytes,
             onReasoningStream: opts.onReasoningStream,

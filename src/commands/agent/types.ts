@@ -1,6 +1,7 @@
 import type { ClientToolDefinition } from "../../agents/pi-embedded-runner/run/params.js";
 import type { ReasoningLevel } from "../../auto-reply/thinking.js";
 import type { ChannelOutboundTargetMode } from "../../channels/plugins/types.js";
+import type { InputProvenance } from "../../sessions/input-provenance.js";
 
 /** Image content block for Claude API multimodal messages. */
 export type ImageContent = {
@@ -77,6 +78,7 @@ export type AgentCommandOpts = {
   /** Optional provider-specific metadata (OpenResponses parity, persisted to transcript by integrations). */
   providerMetadata?: Record<string, unknown>;
   extraSystemPrompt?: string;
+  inputProvenance?: InputProvenance;
   /** Per-call stream param overrides (best-effort). */
   streamParams?: AgentStreamParams;
   /** Optional max decoded bytes to include for base64 data in tool results. */
