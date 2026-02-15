@@ -1,8 +1,47 @@
-# VIDA Release Sync Workflow
+# VIDA Sync Workflow
 
-This is the repeatable process for syncing upstream OpenClaw releases into the VIDA fork and validating downstream Docker compatibility.
+This is the repeatable process for syncing upstream OpenClaw into the VIDA fork (both `main` and releases) and validating downstream Docker compatibility.
 
-## 1) Sync latest upstream release into fork
+## 1) Sync upstream main into fork main
+
+Run from `openclaw`:
+
+```sh
+cd /home/lylepratt/workspace/openclaw
+scripts/sync-upstream-main.sh
+```
+
+Default behavior:
+- fetches `upstream` + `origin`
+- checks out `main`
+- rebases local `main` to `origin/main`
+- merges `upstream/main` into `main`
+- pushes `main`
+
+Useful variants:
+
+```sh
+# Preview only
+scripts/sync-upstream-main.sh --dry-run
+
+# Do not push
+scripts/sync-upstream-main.sh --no-push
+
+# Custom target/source
+scripts/sync-upstream-main.sh --target-branch main --source-ref upstream/main
+```
+
+If conflicts happen:
+- default handoff file: `tmp/codex-handoff-main-main.md`
+
+Optional handoff controls:
+
+```sh
+scripts/sync-upstream-main.sh --no-codex-handoff
+scripts/sync-upstream-main.sh --codex-handoff-path /tmp/main-sync-handoff.md
+```
+
+## 2) Sync latest upstream release into fork
 
 Run from `openclaw`:
 
@@ -35,7 +74,7 @@ scripts/sync-upstream-release.sh --dry-run
 scripts/sync-upstream-release.sh --no-verify
 ```
 
-## 2) If merge conflicts happen
+## 3) If release merge conflicts happen
 
 When the merge fails, the script writes a Codex handoff prompt file:
 
@@ -61,7 +100,7 @@ scripts/sync-upstream-release.sh --no-codex-handoff
 scripts/sync-upstream-release.sh --codex-handoff-path /tmp/my-handoff.md
 ```
 
-## 3) Re-run downstream compatibility checks
+## 4) Re-run downstream compatibility checks
 
 Run from `openclaw`:
 
@@ -85,7 +124,7 @@ scripts/verify-vida-release.sh --fork-tag vida-v2026.2.14 --openclaw-ref vida-v2
 scripts/verify-vida-release.sh --skip-docker
 ```
 
-## 4) Docker publish usage (openclaw-docker)
+## 5) Docker publish usage (openclaw-docker)
 
 ```sh
 cd /home/lylepratt/workspace/openclaw-docker
