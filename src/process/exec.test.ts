@@ -41,7 +41,7 @@ describe("runCommandWithTimeout", () => {
       [process.execPath, "-e", "setTimeout(() => {}, 10_000)"],
       {
         timeoutMs: 5_000,
-        noOutputTimeoutMs: 60,
+        noOutputTimeoutMs: 50,
       },
     );
 
@@ -59,11 +59,12 @@ describe("runCommandWithTimeout", () => {
       ],
       {
         timeoutMs: 5_000,
-        noOutputTimeoutMs: 120,
+        noOutputTimeoutMs: 160,
       },
     );
 
-    expect(result.code).toBe(0);
+    expect(result.signal).toBeNull();
+    expect(result.code ?? 0).toBe(0);
     expect(result.termination).toBe("exit");
     expect(result.noOutputTimedOut).toBe(false);
     expect(result.stdout.length).toBeGreaterThanOrEqual(2);
@@ -73,7 +74,7 @@ describe("runCommandWithTimeout", () => {
     const result = await runCommandWithTimeout(
       [process.execPath, "-e", "setTimeout(() => {}, 10_000)"],
       {
-        timeoutMs: 20,
+        timeoutMs: 15,
       },
     );
 

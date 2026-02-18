@@ -35,7 +35,7 @@ export function guardSessionManager(
     const providerMetadata = opts.providerMetadata;
     sessionManager.appendMessage = ((message: AgentMessage) => {
       if (!message || typeof message !== "object") {
-        return originalAppend(message as never);
+        return originalAppend(message);
       }
       const existing = (message as { providerMetadata?: unknown }).providerMetadata;
       const existingObj =
@@ -52,6 +52,15 @@ export function guardSessionManager(
   }
 
   const hookRunner = getGlobalHookRunner();
+  const beforeMessageWrite = hookRunner?.hasHooks("before_message_write")
+    ? (event: { message: import("@mariozechner/pi-agent-core").AgentMessage }) => {
+        return hookRunner.runBeforeMessageWrite(event, {
+          agentId: opts?.agentId,
+          sessionKey: opts?.sessionKey,
+        });
+      }
+    : undefined;
+
   const transform = hookRunner?.hasHooks("tool_result_persist")
     ? // oxlint-disable-next-line typescript/no-explicit-any
       (message: any, meta: { toolCallId?: string; toolName?: string; isSynthetic?: boolean }) => {
@@ -77,6 +86,7 @@ export function guardSessionManager(
       applyInputProvenanceToUserMessage(message, opts?.inputProvenance),
     transformToolResultForPersistence: transform,
     allowSyntheticToolResults: opts?.allowSyntheticToolResults,
+    beforeMessageWriteHook: beforeMessageWrite,
   });
   (sessionManager as GuardedSessionManager).flushPendingToolResults = guard.flushPendingToolResults;
   return sessionManager as GuardedSessionManager;
