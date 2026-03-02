@@ -14,6 +14,7 @@ import {
 } from "./vida-responses-shared.js";
 
 const OPENAI_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]);
+const VALID_REASONING_EFFORTS = new Set(["low", "medium", "high", "xhigh"]);
 
 function resolveCacheRetention(cacheRetention?: string): string {
   if (cacheRetention) {
@@ -173,6 +174,7 @@ async function loadOpenAIClient(): Promise<any> {
 function buildParams(model: any, context: any, options?: any): any {
   const messages = convertResponsesMessages(model, context, OPENAI_TOOL_CALL_PROVIDERS);
   const cacheRetention = resolveCacheRetention(options?.cacheRetention);
+  const relayMetadata = resolveRelayProviderMetadata(context, options);
   const params: any = {
     model: model.id,
     input: messages,
@@ -192,10 +194,21 @@ function buildParams(model: any, context: any, options?: any): any {
   if (context.tools) {
     params.tools = convertResponsesTools(context.tools);
   }
+  if (relayMetadata) {
+    params.provider_metadata = relayMetadata;
+    if (hasVidaRelayFlag(relayMetadata)) {
+      params.metadata = {
+        ...(params.metadata && typeof params.metadata === "object" ? params.metadata : {}),
+        "vida.ignoreOnProviderRelay": "true",
+      };
+    }
+  }
+  const metadataReasoningEffort = resolveRelayReasoningEffort(relayMetadata, model);
+  const effectiveReasoningEffort = metadataReasoningEffort ?? options?.reasoningEffort;
   if (model.reasoning) {
-    if (options?.reasoningEffort || options?.reasoningSummary) {
+    if (effectiveReasoningEffort || options?.reasoningSummary) {
       params.reasoning = {
-        effort: options?.reasoningEffort || "medium",
+        effort: effectiveReasoningEffort || "medium",
         summary: options?.reasoningSummary || "auto",
       };
       params.include = ["reasoning.encrypted_content"];
@@ -214,6 +227,11 @@ function buildParams(model: any, context: any, options?: any): any {
     }
   }
   return params;
+}
+
+/** @internal Exported for provider payload tests. */
+export function buildVidaResponsesParamsForTest(model: any, context: any, options?: any): any {
+  return buildParams(model, context, options);
 }
 
 function getServiceTierCostMultiplier(serviceTier?: string): number {
@@ -254,6 +272,65 @@ function buildBaseOptions(model: any, options: any, apiKey: string): any {
 
 function clampReasoning(effort?: string): string | undefined {
   return effort === "xhigh" ? "high" : effort;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
+}
+
+function normalizeReasoningEffort(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (!VALID_REASONING_EFFORTS.has(normalized)) return undefined;
+  return normalized;
+}
+
+function resolveRelayProviderMetadata(context: any, options?: any): Record<string, unknown> | undefined {
+  const explicit = asRecord(options?.providerMetadata);
+  if (explicit && Object.keys(explicit).length > 0) {
+    return explicit;
+  }
+  const messages = Array.isArray(context?.messages) ? context.messages : [];
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = asRecord(messages[i]);
+    const messageMetadata = asRecord(message?.providerMetadata);
+    if (messageMetadata && Object.keys(messageMetadata).length > 0) {
+      return messageMetadata;
+    }
+    const parts = Array.isArray(message?.content) ? message.content : [];
+    for (let j = parts.length - 1; j >= 0; j -= 1) {
+      const part = asRecord(parts[j]);
+      const partMetadata = asRecord(part?.providerMetadata);
+      if (partMetadata && Object.keys(partMetadata).length > 0) {
+        return partMetadata;
+      }
+    }
+  }
+  return undefined;
+}
+
+function hasVidaRelayFlag(metadata: Record<string, unknown>): boolean {
+  const direct = metadata["vida.ignoreOnProviderRelay"];
+  if (direct === true || direct === "true" || direct === 1 || direct === "1") return true;
+  const vida = asRecord(metadata.vida);
+  const nested = vida?.ignoreOnProviderRelay;
+  return nested === true || nested === "true" || nested === 1 || nested === "1";
+}
+
+function resolveRelayReasoningEffort(
+  metadata: Record<string, unknown> | undefined,
+  model: any,
+): string | undefined {
+  const vida = asRecord(metadata?.vida);
+  const rawEffort = normalizeReasoningEffort(vida?.reasoningEffort);
+  if (!rawEffort) return undefined;
+  if (supportsXhigh(model)) {
+    return rawEffort;
+  }
+  return clampReasoning(rawEffort);
 }
 
 let registered = false;
