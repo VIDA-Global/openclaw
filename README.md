@@ -109,6 +109,45 @@ pnpm gateway:watch
 
 Note: `pnpm openclaw ...` runs TypeScript directly (via `tsx`). `pnpm build` produces `dist/` for running via Node / the packaged `openclaw` binary.
 
+## Vida Fork Deltas
+
+This repository tracks `upstream/main` and keeps a small set of Vida-specific patches.
+
+- Full historical fork-only commit list: `git log --oneline upstream/main..main`
+- Diff vs upstream tip: `git diff upstream/main...main`
+
+### Product/runtime deltas
+
+- Added a `vida-responses` model provider for Vida backend routing and auth integration.
+  Files: `src/providers/vida-responses.ts`, `src/providers/vida-responses-shared.ts`, `src/config/types.models.ts`, `src/config/zod-schema.core.ts`, `src/agents/pi-embedded-runner/run/attempt.ts`.
+- Extended OpenResponses relay paths to pass provider metadata and reasoning/tool output fields needed by Vida control-plane flows.
+  Files: `src/gateway/openresponses-http.ts`, `src/gateway/open-responses.schema.ts`, `src/agents/pi-embedded-runner/run.ts`, `src/agents/pi-embedded-runner/run/params.ts`, `src/commands/agent.ts`.
+- Fixed a reasoning-stream regression where OpenResponses `reasoning` requests were dropped before embedded runs.
+  File: `src/commands/agent.ts` (`reasoningLevel` pass-through to `runEmbeddedPiAgent`).
+- Hardened tool-call argument parsing for malformed streamed JSON in Vida responses flows.
+  Files: `src/providers/vida-responses-shared.ts`, `src/providers/vida-responses-shared.stream-parse.test.ts`.
+
+### Fork operations deltas
+
+- Added upstream sync automation for main/release maintenance:
+  `scripts/sync-upstream-main.sh`, `scripts/sync-upstream-release.sh`.
+- Added Vida fork release validation and Docker alignment checks:
+  `scripts/verify-vida-release.sh`.
+- Added Vida sync runbook and fork-tag workflow (`vida-vYYYY.M.D` tags):
+  `scripts/README.vida-release-sync.md`.
+
+### Historical fork-only milestones
+
+- `410fc35db`: New Vida LLM provider integration.
+- `cb23a28a8`: Provider metadata passthrough support.
+- `03a48da13`: OpenResponses tool outputs and reasoning passthrough.
+- `a4b7a208f`: Reasoning-summary mapping in OpenResponses output.
+- `cfe0917f2`: Vida provider metadata/reasoning-effort passthrough.
+- `cca004332`: Malformed JSON hardening for Vida tool-call args.
+- `097bcb056`, `b2bf2bd4a`, `44be49c89`, `0408c7f7d`: Vida sync/release script stack.
+
+Update this section whenever a new fork-only patch is merged to `main`.
+
 ## Security defaults (DM access)
 
 OpenClaw connects to real messaging surfaces. Treat inbound DMs as **untrusted input**.
