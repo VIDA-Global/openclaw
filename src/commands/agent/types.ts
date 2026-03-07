@@ -1,3 +1,4 @@
+import type { AgentInternalEvent } from "../../agents/internal-events.js";
 import type { ClientToolDefinition } from "../../agents/pi-embedded-runner/run/params.js";
 import type { ReasoningLevel } from "../../auto-reply/thinking.js";
 import type { ChannelOutboundTargetMode } from "../../channels/plugins/types.js";
@@ -62,6 +63,8 @@ export type AgentCommandOpts = {
   accountId?: string;
   /** Context for embedded run routing (channel/account/thread). */
   runContext?: AgentRunContext;
+  /** Whether this caller is authorized for owner-only tools (defaults true for local CLI calls). */
+  senderIsOwner?: boolean;
   /** Group id for channel-level tool policy resolution. */
   groupId?: string | null;
   /** Group channel label for channel-level tool policy resolution. */
@@ -78,6 +81,7 @@ export type AgentCommandOpts = {
   /** Optional provider-specific metadata (OpenResponses parity, persisted to transcript by integrations). */
   providerMetadata?: Record<string, unknown>;
   extraSystemPrompt?: string;
+  internalEvents?: AgentInternalEvent[];
   inputProvenance?: InputProvenance;
   /** Per-call stream param overrides (best-effort). */
   streamParams?: AgentStreamParams;
@@ -85,4 +89,9 @@ export type AgentCommandOpts = {
   toolResultMaxDataBytes?: number;
   /** Optional reasoning stream callback for hosted integrations (e.g. OpenResponses). */
   onReasoningStream?: (payload: { text?: string; mediaUrls?: string[] }) => void | Promise<void>;
+};
+
+export type AgentCommandIngressOpts = Omit<AgentCommandOpts, "senderIsOwner"> & {
+  /** Ingress callsites must always pass explicit owner authorization state. */
+  senderIsOwner: boolean;
 };
