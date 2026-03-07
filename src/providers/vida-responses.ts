@@ -14,7 +14,7 @@ import {
 } from "./vida-responses-shared.js";
 
 const OPENAI_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]);
-const VALID_REASONING_EFFORTS = new Set(["low", "medium", "high", "xhigh"]);
+const VALID_REASONING_EFFORTS = new Set(["low", "medium", "high", "xhigh", "none"]);
 
 function resolveCacheRetention(cacheRetention?: string): string {
   if (cacheRetention) {
@@ -206,7 +206,9 @@ function buildParams(model: any, context: any, options?: any): any {
   const metadataReasoningEffort = resolveRelayReasoningEffort(relayMetadata, model);
   const effectiveReasoningEffort = metadataReasoningEffort ?? options?.reasoningEffort;
   if (model.reasoning) {
-    if (effectiveReasoningEffort || options?.reasoningSummary) {
+    if (effectiveReasoningEffort === "none") {
+      // Explicit no-thinking override: do not send a reasoning block.
+    } else if (effectiveReasoningEffort || options?.reasoningSummary) {
       params.reasoning = {
         effort: effectiveReasoningEffort || "medium",
         summary: options?.reasoningSummary || "auto",

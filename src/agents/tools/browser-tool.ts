@@ -416,7 +416,7 @@ export function createBrowserTool(opts?: {
           }
           return jsonResult({ profiles: await browserProfiles(baseUrl, { timeoutMs }) });
         case "tabs":
-          return await executeTabsAction({ baseUrl, profile, proxyRequest });
+          return await executeTabsAction({ baseUrl, profile, proxyRequest, timeoutMs });
         case "open": {
           const targetUrl = readTargetUrlParam(params);
           if (proxyRequest) {

@@ -95,4 +95,28 @@ describe("vida-responses provider relay metadata", () => {
       summary: "auto",
     });
   });
+
+  it("omits reasoning when relay metadata explicitly requests none", () => {
+    const params = buildVidaResponsesParamsForTest(
+      makeModel(),
+      { messages: [{ role: "user", content: "hi" }] },
+      {
+        providerMetadata: {
+          vida: {
+            ignoreOnProviderRelay: true,
+            reasoningEffort: "none",
+          },
+        },
+        reasoningEffort: "high",
+      },
+    );
+
+    expect(params.provider_metadata).toEqual({
+      vida: {
+        ignoreOnProviderRelay: true,
+        reasoningEffort: "none",
+      },
+    });
+    expect(params).not.toHaveProperty("reasoning");
+  });
 });
