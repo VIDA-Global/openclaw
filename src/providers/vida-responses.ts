@@ -8,6 +8,7 @@ import {
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   convertResponsesMessages,
   convertResponsesTools,
@@ -161,21 +162,32 @@ async function createClient(
 
 async function loadOpenAIClient(): Promise<any> {
   const require = createRequire(import.meta.url);
-  const resolved = resolveOpenAIClientPath(require);
+  const resolved = await resolveOpenAIClientPath(require, (specifier) => import.meta.resolve(specifier));
   const mod = await import(resolved);
   return mod.default ?? mod;
 }
 
 type ModuleResolver = Pick<NodeJS.Require, "resolve">;
 
-function resolveOpenAIClientPath(require: ModuleResolver): string {
+async function resolveOpenAIClientPath(
+  require: ModuleResolver,
+  resolveImport: (specifier: string) => string | Promise<string>,
+): Promise<string> {
   try {
     return require.resolve("openai");
   } catch {
-    const piAiEntry = require.resolve("@mariozechner/pi-ai");
+    const piAiEntryUrl = await resolveImport("@mariozechner/pi-ai");
+    const piAiEntry = normalizeResolvedPath(piAiEntryUrl);
     const piAiRoot = resolvePackageRootFromEntry(piAiEntry, "@mariozechner/pi-ai");
     return require.resolve("openai", { paths: [piAiRoot] });
   }
+}
+
+function normalizeResolvedPath(value: string): string {
+  if (value.startsWith("file://")) {
+    return fileURLToPath(value);
+  }
+  return value;
 }
 
 function resolvePackageRootFromEntry(entryPath: string, packageName: string): string {
@@ -267,8 +279,11 @@ export function buildVidaResponsesParamsForTest(model: any, context: any, option
 }
 
 /** @internal Exported for provider resolution tests. */
-export function resolveVidaResponsesOpenAIPathForTest(require: ModuleResolver): string {
-  return resolveOpenAIClientPath(require);
+export function resolveVidaResponsesOpenAIPathForTest(
+  require: ModuleResolver,
+  resolveImport: (specifier: string) => string | Promise<string>,
+): Promise<string> {
+  return resolveOpenAIClientPath(require, resolveImport);
 }
 
 function getServiceTierCostMultiplier(serviceTier?: string): number {

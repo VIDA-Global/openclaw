@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildVidaResponsesParamsForTest, resolveVidaResponsesOpenAIPathForTest } from "./vida-responses.js";
 
@@ -168,20 +169,25 @@ describe("vida-responses OpenAI client resolution", () => {
     );
     await writeFile(path.join(nestedOpenAiRoot, "index.js"), "export default class OpenAI {}\n", "utf8");
 
-    const resolved = resolveVidaResponsesOpenAIPathForTest({
-      resolve: (specifier, options) => {
-        if (specifier === "openai" && !options) {
-          throw new Error("module not found");
-        }
-        if (specifier === "@mariozechner/pi-ai") {
-          return path.join(piAiDist, "index.js");
-        }
-        if (specifier === "openai" && options?.paths?.[0] === piAiRoot) {
-          return path.join(nestedOpenAiRoot, "index.js");
-        }
-        throw new Error(`unexpected resolve: ${specifier}`);
+    const resolved = await resolveVidaResponsesOpenAIPathForTest(
+      {
+        resolve: (specifier, options) => {
+          if (specifier === "openai" && !options) {
+            throw new Error("module not found");
+          }
+          if (specifier === "openai" && options?.paths?.[0] === piAiRoot) {
+            return path.join(nestedOpenAiRoot, "index.js");
+          }
+          throw new Error(`unexpected require.resolve: ${specifier}`);
+        },
       },
-    });
+      (specifier) => {
+        if (specifier === "@mariozechner/pi-ai") {
+          return pathToFileURL(path.join(piAiDist, "index.js")).href;
+        }
+        throw new Error(`unexpected import.resolve: ${specifier}`);
+      },
+    );
 
     expect(resolved).toBe(path.join(nestedOpenAiRoot, "index.js"));
   });
