@@ -8,6 +8,7 @@
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { createHookRunner, type HookRunner } from "./hooks.js";
 import type { PluginRegistry } from "./registry.js";
+import { installPluginRuntimeRequestAttributionFetch } from "./runtime/request-attribution-fetch.js";
 import type { PluginHookGatewayContext, PluginHookGatewayStopEvent } from "./types.js";
 
 const log = createSubsystemLogger("plugins");
@@ -34,6 +35,10 @@ function getHookRunnerGlobalState(): HookRunnerGlobalState {
  * Called once when plugins are loaded during gateway startup.
  */
 export function initializeGlobalHookRunner(registry: PluginRegistry): void {
+  // Install the fetch wrapper once before hooks run so plugin-owned OpenAI SDK
+  // clients (for example memory-lancedb-pro's internal chat/embeddings calls)
+  // inherit the active agent/session attribution headers when talking to VIDA.
+  installPluginRuntimeRequestAttributionFetch();
   const state = getHookRunnerGlobalState();
   state.registry = registry;
   state.hookRunner = createHookRunner(registry, {

@@ -7,6 +7,10 @@
 
 import { concatOptionalTextSegments } from "../shared/text/join-segments.js";
 import type { PluginRegistry } from "./registry.js";
+import {
+  resolvePluginRuntimeRequestAttributionScope,
+  withPluginRuntimeRequestAttributionScope,
+} from "./runtime/request-attribution-scope.js";
 import type {
   PluginHookAfterCompactionEvent,
   PluginHookAfterToolCallEvent,
@@ -196,6 +200,13 @@ export function createHookRunner(registry: PluginRegistry, options: HookRunnerOp
     throw new Error(msg, { cause: params.error });
   };
 
+  const withRequestAttributionScope = <T>(ctx: unknown, run: () => T): T => {
+    return withPluginRuntimeRequestAttributionScope(
+      resolvePluginRuntimeRequestAttributionScope(ctx),
+      run,
+    );
+  };
+
   /**
    * Run a hook that doesn't return a value (fire-and-forget style).
    * All handlers are executed in parallel for performance.
@@ -214,7 +225,9 @@ export function createHookRunner(registry: PluginRegistry, options: HookRunnerOp
 
     const promises = hooks.map(async (hook) => {
       try {
-        await (hook.handler as (event: unknown, ctx: unknown) => Promise<void>)(event, ctx);
+        await withRequestAttributionScope(ctx, () =>
+          (hook.handler as (event: unknown, ctx: unknown) => Promise<void>)(event, ctx),
+        );
       } catch (err) {
         handleHookError({ hookName, pluginId: hook.pluginId, error: err });
       }
@@ -244,9 +257,9 @@ export function createHookRunner(registry: PluginRegistry, options: HookRunnerOp
 
     for (const hook of hooks) {
       try {
-        const handlerResult = await (
-          hook.handler as (event: unknown, ctx: unknown) => Promise<TResult>
-        )(event, ctx);
+        const handlerResult = await withRequestAttributionScope(ctx, () =>
+          (hook.handler as (event: unknown, ctx: unknown) => Promise<TResult>)(event, ctx),
+        );
 
         if (handlerResult !== undefined && handlerResult !== null) {
           if (mergeResults && result !== undefined) {
