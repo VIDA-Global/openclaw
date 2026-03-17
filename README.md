@@ -2,8 +2,8 @@
 
 <p align="center">
     <picture>
-        <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/openclaw/openclaw/main/docs/assets/openclaw-logo-text-dark.png">
-        <img src="https://raw.githubusercontent.com/openclaw/openclaw/main/docs/assets/openclaw-logo-text.png" alt="OpenClaw" width="500">
+        <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/openclaw/openclaw/main/docs/assets/openclaw-logo-text-dark.svg">
+        <img src="https://raw.githubusercontent.com/openclaw/openclaw/main/docs/assets/openclaw-logo-text.svg" alt="OpenClaw" width="500">
     </picture>
 </p>
 
@@ -23,10 +23,10 @@ It answers you on the channels you already use (WhatsApp, Telegram, Slack, Disco
 
 If you want a personal, single-user assistant that feels local, fast, and always-on, this is it.
 
-[Website](https://openclaw.ai) · [Docs](https://docs.openclaw.ai) · [Vision](VISION.md) · [DeepWiki](https://deepwiki.com/openclaw/openclaw) · [Getting Started](https://docs.openclaw.ai/start/getting-started) · [Updating](https://docs.openclaw.ai/install/updating) · [Showcase](https://docs.openclaw.ai/start/showcase) · [FAQ](https://docs.openclaw.ai/help/faq) · [Wizard](https://docs.openclaw.ai/start/wizard) · [Nix](https://github.com/openclaw/nix-openclaw) · [Docker](https://docs.openclaw.ai/install/docker) · [Discord](https://discord.gg/clawd)
+[Website](https://openclaw.ai) · [Docs](https://docs.openclaw.ai) · [Vision](VISION.md) · [DeepWiki](https://deepwiki.com/openclaw/openclaw) · [Getting Started](https://docs.openclaw.ai/start/getting-started) · [Updating](https://docs.openclaw.ai/install/updating) · [Showcase](https://docs.openclaw.ai/start/showcase) · [FAQ](https://docs.openclaw.ai/help/faq) · [Onboarding](https://docs.openclaw.ai/start/wizard) · [Nix](https://github.com/openclaw/nix-openclaw) · [Docker](https://docs.openclaw.ai/install/docker) · [Discord](https://discord.gg/clawd)
 
-Preferred setup: run the onboarding wizard (`openclaw onboard`) in your terminal.
-The wizard guides you step by step through setting up the gateway, workspace, channels, and skills. The CLI wizard is the recommended path and works on **macOS, Linux, and Windows (via WSL2; strongly recommended)**.
+Preferred setup: run `openclaw onboard` in your terminal.
+OpenClaw Onboard guides you step by step through setting up the gateway, workspace, channels, and skills. It is the recommended CLI setup path and works on **macOS, Linux, and Windows (via WSL2; strongly recommended)**.
 Works with npm, pnpm, or bun.
 New install? Start here: [Getting started](https://docs.openclaw.ai/start/getting-started)
 
@@ -58,7 +58,7 @@ npm install -g openclaw@latest
 openclaw onboard --install-daemon
 ```
 
-The wizard installs the Gateway daemon (launchd/systemd user service) so it stays running.
+OpenClaw Onboard installs the Gateway daemon (launchd/systemd user service) so it stays running.
 
 ## Quick start (TL;DR)
 
@@ -103,7 +103,7 @@ pnpm build
 
 pnpm openclaw onboard --install-daemon
 
-# Dev loop (auto-reload on TS changes)
+# Dev loop (auto-reload on source/config changes)
 pnpm gateway:watch
 ```
 
@@ -119,13 +119,23 @@ This repository tracks `upstream/main` and keeps a small set of Vida-specific pa
 ### Product/runtime deltas
 
 - Added a `vida-responses` model provider for Vida backend routing and auth integration.
-  Files: `src/providers/vida-responses.ts`, `src/providers/vida-responses-shared.ts`, `src/config/types.models.ts`, `src/config/zod-schema.core.ts`, `src/agents/pi-embedded-runner/run/attempt.ts`.
-- Extended OpenResponses relay paths to pass provider metadata and reasoning/tool output fields needed by Vida control-plane flows.
-  Files: `src/gateway/openresponses-http.ts`, `src/gateway/open-responses.schema.ts`, `src/agents/pi-embedded-runner/run.ts`, `src/agents/pi-embedded-runner/run/params.ts`, `src/commands/agent.ts`.
-- Fixed a reasoning-stream regression where OpenResponses `reasoning` requests were dropped before embedded runs.
-  File: `src/commands/agent.ts` (`reasoningLevel` pass-through to `runEmbeddedPiAgent`).
+  Why: Vida runs OpenClaw behind a separate control plane, so upstream provider auth/config did not cover Vida's backend-issued credentials, routing rules, and OpenAI-compatible response surface.
+  Files: `src/providers/vida-responses.ts`, `src/providers/vida-responses-shared.ts`, `src/config/types.models.ts`, `src/config/zod-schema.ts`, `src/agents/pi-embedded-runner/run/attempt.ts`.
+- Extended OpenResponses relay paths to carry the extra fields Vida depends on when brokering hosted agent runs.
+  Why: Vida needs provider metadata, streamed reasoning, client tool definitions, and bounded tool-result payloads to survive the hop from the OpenResponses HTTP layer into embedded agent execution without losing parity.
+  Files: `src/gateway/openresponses-http.ts`, `src/gateway/open-responses.schema.ts`, `src/agents/agent-command.ts`, `src/agents/command/types.ts`, `src/agents/pi-embedded-runner/run.ts`, `src/agents/pi-embedded-runner/run/params.ts`, `src/agents/pi-embedded-subscribe.ts`, `src/agents/pi-embedded-subscribe.handlers.tools.ts`.
+- Fixed the reasoning-stream pass-through path for OpenResponses-driven runs.
+  Why: Vida surfaces intermediate reasoning in its own control-plane UX, so dropping `reasoningLevel` or `onReasoningStream` at the command boundary regresses product behavior even when the underlying model/provider supports it.
+  Files: `src/agents/agent-command.ts`, `src/agents/command/types.ts`, `src/gateway/openresponses-http.ts`.
 - Hardened tool-call argument parsing for malformed streamed JSON in Vida responses flows.
+  Why: Vida receives streamed tool-call payloads from heterogeneous upstream providers and relays; malformed partial JSON should degrade gracefully instead of breaking the whole response pipeline.
   Files: `src/providers/vida-responses-shared.ts`, `src/providers/vida-responses-shared.stream-parse.test.ts`.
+- Added browser-client timeout classification and cold-start resilience fixes.
+  Why: Vida routes browser-dependent hosted workflows through long-lived gateway processes, so indefinite reads or poorly classified transient failures create visible control-plane stalls and retries in production.
+  Files: `src/browser/client.ts`, `src/browser/client-fetch.ts`, `src/browser/client-fetch.error-classification.test.ts`, `src/agents/tools/browser-tool.ts`, `src/agents/tools/browser-tool.actions.ts`, `src/agents/tools/browser-tool.test.ts`.
+- Added transcript/tool-result guard handling that preserves provider metadata on streamed tool output.
+  Why: Vida needs downstream transcripts and relay metadata to stay correlated across the OpenResponses, provider, and audit surfaces even when tool output is chunked or sanitized.
+  Files: `src/agents/session-tool-result-guard-wrapper.ts`, `src/web/session.ts`, `src/web/session.test.ts`.
 
 ### Fork operations deltas
 
@@ -135,6 +145,8 @@ This repository tracks `upstream/main` and keeps a small set of Vida-specific pa
   `scripts/verify-vida-release.sh`.
 - Added Vida sync runbook and fork-tag workflow (`vida-vYYYY.M.D` tags):
   `scripts/README.vida-release-sync.md`.
+- Why these scripts exist:
+  Vida ships downstream Docker/provisioner integrations that consume fork tags directly, so release sync cannot be a generic upstream merge; it must preserve fork patches, emit predictable `vida-*` tags, and verify Docker ref/date-tag compatibility before publish.
 
 ### Historical fork-only milestones
 
@@ -171,7 +183,7 @@ Run `openclaw doctor` to surface risky/misconfigured DM policies.
 - **[Live Canvas](https://docs.openclaw.ai/platforms/mac/canvas)** — agent-driven visual workspace with [A2UI](https://docs.openclaw.ai/platforms/mac/canvas#canvas-a2ui).
 - **[First-class tools](https://docs.openclaw.ai/tools)** — browser, canvas, nodes, cron, sessions, and Discord/Slack actions.
 - **[Companion apps](https://docs.openclaw.ai/platforms/macos)** — macOS menu bar app + iOS/Android [nodes](https://docs.openclaw.ai/nodes).
-- **[Onboarding](https://docs.openclaw.ai/start/wizard) + [skills](https://docs.openclaw.ai/tools/skills)** — wizard-driven setup with bundled/managed/workspace skills.
+- **[Onboarding](https://docs.openclaw.ai/start/wizard) + [skills](https://docs.openclaw.ai/tools/skills)** — onboarding-driven setup with bundled/managed/workspace skills.
 
 ## Star History
 
@@ -182,7 +194,7 @@ Run `openclaw doctor` to surface risky/misconfigured DM policies.
 ### Core platform
 
 - [Gateway WS control plane](https://docs.openclaw.ai/gateway) with sessions, presence, config, cron, webhooks, [Control UI](https://docs.openclaw.ai/web), and [Canvas host](https://docs.openclaw.ai/platforms/mac/canvas#canvas-a2ui).
-- [CLI surface](https://docs.openclaw.ai/tools/agent-send): gateway, agent, send, [wizard](https://docs.openclaw.ai/start/wizard), and [doctor](https://docs.openclaw.ai/gateway/doctor).
+- [CLI surface](https://docs.openclaw.ai/tools/agent-send): gateway, agent, send, [onboarding](https://docs.openclaw.ai/start/wizard), and [doctor](https://docs.openclaw.ai/gateway/doctor).
 - [Pi agent runtime](https://docs.openclaw.ai/concepts/agent) in RPC mode with tool streaming and block streaming.
 - [Session model](https://docs.openclaw.ai/concepts/session): `main` for direct chats, group isolation, activation modes, queue modes, reply-back. Group rules: [Groups](https://docs.openclaw.ai/channels/groups).
 - [Media pipeline](https://docs.openclaw.ai/nodes/images): images/audio/video, transcription hooks, size caps, temp file lifecycle. Audio details: [Audio](https://docs.openclaw.ai/nodes/audio).
@@ -461,7 +473,7 @@ Use these when you’re past the onboarding flow and want the deeper reference.
 - [Run the Gateway by the book with the operational runbook.](https://docs.openclaw.ai/gateway)
 - [Learn how the Control UI/Web surfaces work and how to expose them safely.](https://docs.openclaw.ai/web)
 - [Understand remote access over SSH tunnels or tailnets.](https://docs.openclaw.ai/gateway/remote)
-- [Follow the onboarding wizard flow for a guided setup.](https://docs.openclaw.ai/start/wizard)
+- [Follow OpenClaw Onboard for a guided setup.](https://docs.openclaw.ai/start/wizard)
 - [Wire external triggers via the webhook surface.](https://docs.openclaw.ai/automation/webhook)
 - [Set up Gmail Pub/Sub triggers.](https://docs.openclaw.ai/automation/gmail-pubsub)
 - [Learn the macOS menu bar companion details.](https://docs.openclaw.ai/platforms/mac/menu-bar)
