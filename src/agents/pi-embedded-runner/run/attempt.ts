@@ -11,6 +11,7 @@ import {
   resolveTelegramInlineButtonsScope,
   resolveTelegramReactionLevel,
 } from "../../../../extensions/telegram/api.js";
+import "../../../providers/vida-responses.js";
 import { resolveHeartbeatPrompt } from "../../../auto-reply/heartbeat.js";
 import { resolveChannelCapabilities } from "../../../config/channel-capabilities.js";
 import type { OpenClawConfig } from "../../../config/config.js";
@@ -2067,6 +2068,7 @@ export async function runEmbeddedAttempt(
         sessionKey: params.sessionKey,
         inputProvenance: params.inputProvenance,
         allowSyntheticToolResults: transcriptPolicy.allowSyntheticToolResults,
+        providerMetadata: params.providerMetadata,
         allowedToolNames,
       });
       trackSessionManagerAccess(params.sessionFile);
@@ -2567,6 +2569,7 @@ export async function runEmbeddedAttempt(
         verboseLevel: params.verboseLevel,
         reasoningMode: params.reasoningLevel ?? "off",
         toolResultFormat: params.toolResultFormat,
+        toolResultMaxDataBytes: params.toolResultMaxDataBytes,
         shouldEmitToolResult: params.shouldEmitToolResult,
         shouldEmitToolOutput: params.shouldEmitToolOutput,
         onToolResult: params.onToolResult,

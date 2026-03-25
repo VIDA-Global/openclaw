@@ -1,6 +1,7 @@
 import type { AgentInternalEvent } from "../../agents/internal-events.js";
 import type { ClientToolDefinition } from "../../agents/pi-embedded-runner/run/params.js";
 import type { SpawnedRunMetadata } from "../../agents/spawned-context.js";
+import type { ReasoningLevel } from "../../auto-reply/thinking.js";
 import type { ChannelOutboundTargetMode } from "../../channels/plugins/types.js";
 import type { InputProvenance } from "../../sessions/input-provenance.js";
 
@@ -49,6 +50,8 @@ export type AgentCommandOpts = {
   thinking?: string;
   thinkingOnce?: string;
   verbose?: string;
+  /** Optional reasoning stream level for this run. */
+  reasoningLevel?: ReasoningLevel;
   json?: boolean;
   timeout?: string;
   deliver?: boolean;
@@ -81,11 +84,17 @@ export type AgentCommandOpts = {
   abortSignal?: AbortSignal;
   lane?: string;
   runId?: string;
+  /** Optional provider-specific metadata (OpenResponses parity, persisted to transcript by integrations). */
+  providerMetadata?: Record<string, unknown>;
   extraSystemPrompt?: string;
   internalEvents?: AgentInternalEvent[];
   inputProvenance?: InputProvenance;
   /** Per-call stream param overrides (best-effort). */
   streamParams?: AgentStreamParams;
+  /** Optional max decoded bytes to include for base64 data in tool results. */
+  toolResultMaxDataBytes?: number;
+  /** Optional reasoning stream callback for hosted integrations (e.g. OpenResponses). */
+  onReasoningStream?: (payload: { text?: string; mediaUrls?: string[] }) => void | Promise<void>;
   /** Explicit workspace directory override (for subagents to inherit parent workspace). */
   workspaceDir?: SpawnedRunMetadata["workspaceDir"];
 };
