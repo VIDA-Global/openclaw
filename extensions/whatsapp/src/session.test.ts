@@ -1,8 +1,8 @@
 import { EventEmitter } from "node:events";
 import fsSync from "node:fs";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resetLogger, setLoggerOverride } from "../../../src/logging.js";
+import { resetLogger, setLoggerOverride } from "openclaw/plugin-sdk/runtime-env";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { baileys, getLastSocket, resetBaileysMocks, resetLoadConfigMock } from "./test-helpers.js";
 
 const useMultiFileAuthStateMock = vi.mocked(baileys.useMultiFileAuthState);
@@ -12,6 +12,7 @@ let formatError: typeof import("./session.js").formatError;
 let getStatusCode: typeof import("./session.js").getStatusCode;
 let logWebSelfId: typeof import("./session.js").logWebSelfId;
 let waitForWaConnection: typeof import("./session.js").waitForWaConnection;
+let waitForCredsSaveQueue: typeof import("./session.js").waitForCredsSaveQueue;
 
 async function flushCredsUpdate() {
   await new Promise<void>((resolve) => setImmediate(resolve));
@@ -58,19 +59,50 @@ function mockCredsJsonSpies(readContents: string) {
   };
 }
 
+function mockLogWebSelfIdCreds(me: Record<string, string>) {
+  const existsSpy = vi.spyOn(fsSync, "existsSync").mockImplementation((p) => {
+    if (typeof p !== "string") {
+      return false;
+    }
+    return p.endsWith("creds.json");
+  });
+  const readSpy = vi.spyOn(fsSync, "readFileSync").mockImplementation((p) => {
+    if (typeof p === "string" && p.endsWith("creds.json")) {
+      return JSON.stringify({ me });
+    }
+    throw new Error(`unexpected readFileSync path: ${String(p)}`);
+  });
+  return {
+    restore() {
+      existsSpy.mockRestore();
+      readSpy.mockRestore();
+    },
+  };
+}
+
 describe("web session", () => {
-  beforeEach(async () => {
-    vi.resetModules();
-    ({ createWaSocket, formatError, getStatusCode, logWebSelfId, waitForWaConnection } =
-      await import("./session.js"));
+  beforeAll(async () => {
+    ({
+      createWaSocket,
+      formatError,
+      getStatusCode,
+      logWebSelfId,
+      waitForWaConnection,
+      waitForCredsSaveQueue,
+    } = await import("./session.js"));
+  });
+
+  beforeEach(() => {
     vi.clearAllMocks();
     resetBaileysMocks();
     resetLoadConfigMock();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await waitForCredsSaveQueue();
     resetLogger();
     setLoggerOverride(null);
+    vi.unstubAllEnvs();
     vi.useRealTimers();
   });
 
@@ -97,6 +129,41 @@ describe("web session", () => {
     expect(saveCreds).toHaveBeenCalled();
   });
 
+  it("uses ambient env proxy agent when HTTPS_PROXY is configured", async () => {
+    vi.stubEnv("HTTPS_PROXY", "http://proxy.test:8080");
+
+    await createWaSocket(false, false);
+
+    const passed = (baileys.makeWASocket as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
+      agent?: unknown;
+      fetchAgent?: unknown;
+    };
+    expect(passed.agent).toBeDefined();
+    expect(passed.fetchAgent).toBe(passed.agent);
+  });
+
+  it("does not create a proxy agent when no env proxy is configured", async () => {
+    for (const key of [
+      "ALL_PROXY",
+      "all_proxy",
+      "HTTP_PROXY",
+      "http_proxy",
+      "HTTPS_PROXY",
+      "https_proxy",
+    ]) {
+      vi.stubEnv(key, "");
+    }
+
+    await createWaSocket(false, false);
+
+    const passed = (baileys.makeWASocket as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
+      agent?: unknown;
+      fetchAgent?: unknown;
+    };
+    expect(passed.agent).toBeUndefined();
+    expect(passed.fetchAgent).toBeUndefined();
+  });
+
   it("waits for connection open", async () => {
     const ev = new EventEmitter();
     const promise = waitForWaConnection({ ev } as unknown as ReturnType<
@@ -119,18 +186,7 @@ describe("web session", () => {
   });
 
   it("logWebSelfId prints cached E.164 when creds exist", () => {
-    const existsSpy = vi.spyOn(fsSync, "existsSync").mockImplementation((p) => {
-      if (typeof p !== "string") {
-        return false;
-      }
-      return p.endsWith("creds.json");
-    });
-    const readSpy = vi.spyOn(fsSync, "readFileSync").mockImplementation((p) => {
-      if (typeof p === "string" && p.endsWith("creds.json")) {
-        return JSON.stringify({ me: { id: "12345@s.whatsapp.net" } });
-      }
-      throw new Error(`unexpected readFileSync path: ${String(p)}`);
-    });
+    const creds = mockLogWebSelfIdCreds({ id: "12345@s.whatsapp.net" });
     const runtime = {
       log: vi.fn(),
       error: vi.fn(),
@@ -142,24 +198,13 @@ describe("web session", () => {
     expect(runtime.log).toHaveBeenCalledWith(
       expect.stringContaining("Web Channel: +12345 (jid 12345@s.whatsapp.net)"),
     );
-    existsSpy.mockRestore();
-    readSpy.mockRestore();
+    creds.restore();
   });
 
   it("logWebSelfId prints cached lid details when creds include a lid", () => {
-    const existsSpy = vi.spyOn(fsSync, "existsSync").mockImplementation((p) => {
-      if (typeof p !== "string") {
-        return false;
-      }
-      return p.endsWith("creds.json");
-    });
-    const readSpy = vi.spyOn(fsSync, "readFileSync").mockImplementation((p) => {
-      if (typeof p === "string" && p.endsWith("creds.json")) {
-        return JSON.stringify({
-          me: { id: "12345@s.whatsapp.net", lid: "777@lid" },
-        });
-      }
-      throw new Error(`unexpected readFileSync path: ${String(p)}`);
+    const creds = mockLogWebSelfIdCreds({
+      id: "12345@s.whatsapp.net",
+      lid: "777@lid",
     });
     const runtime = {
       log: vi.fn(),
@@ -172,8 +217,7 @@ describe("web session", () => {
     expect(runtime.log).toHaveBeenCalledWith(
       expect.stringContaining("Web Channel: +12345 (jid 12345@s.whatsapp.net, lid 777@lid)"),
     );
-    existsSpy.mockRestore();
-    readSpy.mockRestore();
+    creds.restore();
   });
 
   it("formatError prints Boom-like payload message", () => {
