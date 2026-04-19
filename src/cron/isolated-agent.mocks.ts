@@ -11,7 +11,7 @@ vi.mock("../agents/pi-embedded.js", () => ({
 }));
 
 vi.mock("../agents/model-catalog.js", () => ({
-  loadModelCatalog: vi.fn(),
+  loadModelCatalog: vi.fn(async () => []),
 }));
 
 vi.mock("../agents/model-selection.js", async () => {
