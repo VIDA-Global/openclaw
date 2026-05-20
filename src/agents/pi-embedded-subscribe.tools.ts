@@ -18,6 +18,19 @@ const TOOL_RESULT_MAX_CHARS = 8000;
 const TOOL_ERROR_MAX_CHARS = 400;
 const TOOL_DENIAL_ERROR_CODES = ["SYSTEM_RUN_DENIED", "INVALID_REQUEST"] as const;
 
+export type ToolResultSanitizerOptions = {
+  /** Optional max decoded bytes to keep for base64 data fields. */
+  maxDataBytes?: number;
+};
+
+function estimateBase64Bytes(data: string): number {
+  if (data.length === 0) {
+    return 0;
+  }
+  const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor((data.length * 3) / 4) - padding);
+}
+
 function truncateToolText(text: string): string {
   if (text.length <= TOOL_RESULT_MAX_CHARS) {
     return text;
@@ -209,7 +222,7 @@ export function sanitizeToolArgs(args: unknown): unknown {
   return redactStringsDeep(args);
 }
 
-export function sanitizeToolResult(result: unknown): unknown {
+export function sanitizeToolResult(result: unknown, options?: ToolResultSanitizerOptions): unknown {
   if (typeof result === "string") {
     return redactToolPayloadText(result);
   }
@@ -220,6 +233,12 @@ export function sanitizeToolResult(result: unknown): unknown {
     return result;
   }
   const record = result as Record<string, unknown>;
+  const maxDataBytes =
+    typeof options?.maxDataBytes === "number" &&
+    Number.isFinite(options.maxDataBytes) &&
+    options.maxDataBytes > 0
+      ? options.maxDataBytes
+      : undefined;
   // Strip image data first so the deep redaction pass doesn't waste work
   // scanning base64 payloads (and so we capture the original byte counts).
   const preCleaned: Record<string, unknown> = { ...record };
@@ -230,12 +249,22 @@ export function sanitizeToolResult(result: unknown): unknown {
         return item;
       }
       const entry = item as Record<string, unknown>;
-      if (readStringValue(entry.type) === "image") {
-        const data = readStringValue(entry.data);
-        const bytes = data ? data.length : undefined;
+      const type = readStringValue(entry.type);
+      const data = typeof entry.data === "string" ? entry.data : undefined;
+      if (data !== undefined) {
+        const bytes = estimateBase64Bytes(data);
+        const shouldOmit = maxDataBytes === undefined ? type === "image" : bytes > maxDataBytes;
+        if (!shouldOmit) {
+          return entry;
+        }
         const cleaned = { ...entry };
         delete cleaned.data;
         return Object.assign({}, cleaned, { bytes, omitted: true });
+      }
+      if (type === "image") {
+        const cleaned = { ...entry };
+        delete cleaned.data;
+        return Object.assign({}, cleaned, { omitted: true });
       }
       return entry;
     });

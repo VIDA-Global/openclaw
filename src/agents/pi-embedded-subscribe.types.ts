@@ -28,6 +28,7 @@ export type SubscribeEmbeddedPiSessionParams = {
   thinkingLevel?: ThinkLevel;
   toolResultFormat?: ToolResultFormat;
   toolProgressDetail?: ToolProgressDetailMode;
+  toolResultMaxDataBytes?: number;
   shouldEmitToolResult?: () => boolean;
   shouldEmitToolOutput?: () => boolean;
   onToolResult?: (payload: ReplyPayload) => void | Promise<void>;

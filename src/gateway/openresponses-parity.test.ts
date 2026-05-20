@@ -258,10 +258,24 @@ describe("OpenResponses Feature Parity", () => {
         input: [
           {
             type: "function_call_output" as const,
+            id: "fc_output_123",
             call_id: "call_123",
             output: '{"temperature": "72°F", "condition": "sunny"}',
           },
         ],
+      };
+
+      const result = CreateResponseBodySchema.safeParse(validRequest);
+      expect(result.success).toBe(true);
+    });
+
+    it("should validate provider metadata", () => {
+      const validRequest = {
+        model: "openclaw",
+        input: "Hi",
+        provider_metadata: {
+          vida: { ignoreOnProviderRelay: true },
+        },
       };
 
       const result = CreateResponseBodySchema.safeParse(validRequest);
@@ -329,6 +343,19 @@ describe("OpenResponses Feature Parity", () => {
         call_id: "call_456",
         name: "get_weather",
         arguments: '{"location": "San Francisco"}',
+      };
+
+      const result = OutputItemSchema.safeParse(functionCallOutput);
+      expect(result.success).toBe(true);
+    });
+
+    it("should validate response with function_call_output output", () => {
+      const functionCallOutput = {
+        type: "function_call_output" as const,
+        id: "msg_123",
+        call_id: "call_456",
+        output: '{"ok":true}',
+        status: "completed" as const,
       };
 
       const result = OutputItemSchema.safeParse(functionCallOutput);

@@ -102,6 +102,10 @@ const BROWSER_TOOL_MODEL_HINT =
   "Do NOT retry the browser tool — it will keep failing. " +
   "Use an alternative approach or inform the user that the browser is currently unavailable.";
 
+const BROWSER_TOOL_BOUNDED_RETRY_HINT =
+  'Do NOT blindly retry in a loop. Take a fresh browser snapshot (snapshotFormat="ai", refs="aria"), then retry this action once with updated refs. ' +
+  "If it still times out, report the browser as unavailable.";
+
 function isRateLimitStatus(status: number): boolean {
   return status === 429;
 }
@@ -153,11 +157,30 @@ function normalizeErrorMessage(err: unknown): string {
   return String(err);
 }
 
-function appendBrowserToolModelHint(message: string): string {
-  if (message.includes(BROWSER_TOOL_MODEL_HINT)) {
+function isBrowserActionPath(url: string): boolean {
+  try {
+    const pathname = new URL(url, "http://localhost").pathname.toLowerCase();
+    return (
+      pathname === "/act" ||
+      pathname === "/tabs/action" ||
+      pathname === "/screenshot" ||
+      pathname === "/navigate" ||
+      pathname === "/pdf" ||
+      pathname.startsWith("/hooks/")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function appendBrowserToolModelHint(message: string, modelHint = BROWSER_TOOL_MODEL_HINT): string {
+  if (
+    message.includes(BROWSER_TOOL_MODEL_HINT) ||
+    message.includes(BROWSER_TOOL_BOUNDED_RETRY_HINT)
+  ) {
     return message;
   }
-  return `${message} ${BROWSER_TOOL_MODEL_HINT}`;
+  return `${message} ${modelHint}`;
 }
 
 type BrowserFetchFailureKind = "timeout" | "aborted" | "persistent";
@@ -194,8 +217,16 @@ function enhanceDispatcherPathError(url: string, err: unknown): Error {
   const kind = classifyBrowserFetchFailure(err);
   const ownership = resolveDispatcherBrowserControlOwnership(url);
   const operatorHint = resolveBrowserFetchOperatorHint(url, { ownership });
+  const modelHint =
+    isBrowserActionPath(url) && (kind === "timeout" || kind === "aborted")
+      ? BROWSER_TOOL_BOUNDED_RETRY_HINT
+      : undefined;
   const suffix =
-    kind === "persistent" ? `${operatorHint} ${BROWSER_TOOL_MODEL_HINT}` : operatorHint;
+    kind === "persistent"
+      ? `${operatorHint} ${BROWSER_TOOL_MODEL_HINT}`
+      : modelHint
+        ? `${operatorHint} ${modelHint}`
+        : operatorHint;
   const normalized = msg.endsWith(".") ? msg : `${msg}.`;
   return new Error(`${normalized} ${suffix}`, err instanceof Error ? { cause: err } : undefined);
 }
@@ -204,15 +235,18 @@ function enhanceBrowserFetchError(url: string, err: unknown, timeoutMs: number):
   const operatorHint = resolveBrowserFetchOperatorHint(url);
   const msg = normalizeErrorMessage(err);
   const kind = classifyBrowserFetchFailure(err);
+  const modelHint = isBrowserActionPath(url) ? BROWSER_TOOL_BOUNDED_RETRY_HINT : undefined;
   if (kind === "timeout") {
+    const message = `Can't reach the OpenClaw browser control service (timed out after ${timeoutMs}ms). ${operatorHint}`;
     return new Error(
-      `Can't reach the OpenClaw browser control service (timed out after ${timeoutMs}ms). ${operatorHint}`,
+      modelHint ? appendBrowserToolModelHint(message, modelHint) : message,
       err instanceof Error ? { cause: err } : undefined,
     );
   }
   if (kind === "aborted") {
+    const message = `Browser control request was cancelled. ${operatorHint}`;
     return new Error(
-      `Browser control request was cancelled. ${operatorHint}`,
+      modelHint ? appendBrowserToolModelHint(message, modelHint) : message,
       err instanceof Error ? { cause: err } : undefined,
     );
   }

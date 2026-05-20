@@ -837,6 +837,29 @@ describe("sanitizeSessionHistory", () => {
     ]);
   });
 
+  it("applies Responses replay repair to vida-responses", async () => {
+    const messages: AgentMessage[] = [
+      makeAssistantMessage([{ type: "toolCall", id: "call_vida", name: "read", arguments: {} }], {
+        stopReason: "toolUse",
+      }),
+      makeUserMessage("continue"),
+    ];
+
+    const result = await sanitizeSessionHistory({
+      messages,
+      modelApi: "vida-responses",
+      provider: "vida",
+      sessionManager: mockSessionManager,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    expect(result.map((message) => message.role)).toEqual(["assistant", "toolResult", "user"]);
+    expect((result[1] as { toolCallId?: string }).toolCallId).toBe("call_vida");
+    expect((result[1] as Extract<AgentMessage, { role: "toolResult" }>).content).toEqual([
+      { type: "text", text: "aborted" },
+    ]);
+  });
+
   it("drops duplicate and orphan OpenAI outputs while preserving the first real result", async () => {
     const messages: AgentMessage[] = [
       castAgentMessage({

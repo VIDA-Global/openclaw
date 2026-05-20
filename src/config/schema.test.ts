@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { SENSITIVE_URL_HINT_TAG } from "../shared/net/redact-sensitive-url.js";
 import { buildConfigSchema, lookupConfigSchema } from "./schema.js";
 import { applyDerivedTags, CONFIG_TAGS, deriveTagsForPath } from "./schema.tags.js";
+import { MODEL_APIS } from "./types.models.js";
 import { ToolsSchema } from "./zod-schema.agent-runtime.js";
 import { OpenClawSchema } from "./zod-schema.js";
 
@@ -122,6 +123,27 @@ describe("config schema", () => {
     expect(res.version.trim().length).toBeGreaterThan(0);
     expect(res.generatedAt).toBeTypeOf("string");
     expect(res.generatedAt.trim().length).toBeGreaterThan(0);
+  });
+
+  it("keeps vida-responses in the supported model API surface", () => {
+    expect(MODEL_APIS).toContain("vida-responses");
+  });
+
+  it("accepts responses toolResultMaxDataBytes in the runtime config schema", () => {
+    const parsed = OpenClawSchema.parse({
+      gateway: {
+        http: {
+          endpoints: {
+            responses: {
+              enabled: true,
+              toolResultMaxDataBytes: 4096,
+            },
+          },
+        },
+      },
+    });
+
+    expect(parsed.gateway?.http?.endpoints?.responses?.toolResultMaxDataBytes).toBe(4096);
   });
 
   it("includes MCP SSE header schema under mcp.servers entries", () => {

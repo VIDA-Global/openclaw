@@ -11,6 +11,15 @@ function normalizeMatchTarget(value: string): string {
     const stripped = value.replace(/^\\\\[?.]\\/, "");
     return normalizeLowercaseStringOrEmpty(stripped.replace(/\\/g, "/"));
   }
+  if (process.platform === "darwin") {
+    const normalized = value.replace(/\\\\/g, "/");
+    for (const alias of ["/var", "/tmp", "/etc"]) {
+      if (normalized === alias || normalized.startsWith(`${alias}/`)) {
+        return `/private${normalized}`;
+      }
+    }
+    return normalized;
+  }
   return value.replace(/\\\\/g, "/");
 }
 

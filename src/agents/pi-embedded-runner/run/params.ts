@@ -135,6 +135,8 @@ export type RunEmbeddedPiAgentParams = {
   reasoningLevel?: ReasoningLevel;
   toolResultFormat?: ToolResultFormat;
   toolProgressDetail?: ToolProgressDetailMode;
+  /** Optional max decoded bytes to include for base64 data in tool results. */
+  toolResultMaxDataBytes?: number;
   /** If true, suppress tool error warning payloads for this run (including mutating tools). */
   suppressToolErrorWarnings?: boolean;
   /** Bootstrap context mode for workspace file injection. */
@@ -201,6 +203,8 @@ export type RunEmbeddedPiAgentParams = {
     sessionKey?: string;
   }) => void | Promise<void>;
   lane?: string;
+  /** Optional provider-specific metadata passed through integrations. */
+  providerMetadata?: Record<string, unknown>;
   enqueue?: CommandQueueEnqueueFn;
   extraSystemPrompt?: string;
   sourceReplyDeliveryMode?: SourceReplyDeliveryMode;

@@ -391,6 +391,21 @@ function createResponseResource(params: {
   };
 }
 
+function safeJsonStringify(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    try {
+      return String(value);
+    } catch {
+      return "";
+    }
+  }
+}
+
 async function runResponsesAgentCommand(params: {
   message: string;
   images: ImageContent[];
@@ -400,6 +415,11 @@ async function runResponsesAgentCommand(params: {
   streamParams: { maxTokens?: number; temperature?: number; topP?: number } | undefined;
   sessionKey: string;
   runId: string;
+  thinkingOnce?: string;
+  reasoningLevel?: "stream";
+  providerMetadata?: Record<string, unknown>;
+  toolResultMaxDataBytes?: number;
+  onReasoningStream?: (payload: { text?: string; mediaUrls?: string[] }) => void | Promise<void>;
   messageChannel: string;
   senderIsOwner: boolean;
   deps: CliDeps;
@@ -418,6 +438,11 @@ async function runResponsesAgentCommand(params: {
       deliver: false,
       messageChannel: params.messageChannel,
       bestEffortDeliver: false,
+      thinkingOnce: params.thinkingOnce,
+      reasoningLevel: params.reasoningLevel,
+      providerMetadata: params.providerMetadata,
+      toolResultMaxDataBytes: params.toolResultMaxDataBytes,
+      onReasoningStream: params.onReasoningStream,
       senderIsOwner: params.senderIsOwner,
       allowModelOverride: true,
       abortSignal: params.abortSignal,
@@ -475,6 +500,16 @@ export async function handleOpenResponsesHttpRequest(
   const stream = Boolean(payload.stream);
   const model = payload.model;
   const user = payload.user;
+  const providerMetadata =
+    payload.provider_metadata ??
+    (payload.metadata?.["vida.ignoreOnProviderRelay"] === "true"
+      ? { vida: { ignoreOnProviderRelay: true } }
+      : undefined);
+  const reasoning = payload.reasoning;
+  const thinkingOnce = reasoning?.effort;
+  const reasoningLevel = reasoning ? ("stream" as const) : undefined;
+  const reasoningSummary = Boolean(reasoning?.summary);
+  const toolResultMaxDataBytes = opts.config?.toolResultMaxDataBytes;
   const agentId = resolveAgentIdForRequest({ req, model });
   const { modelOverride, errorMessage: modelError } = await resolveOpenAiCompatModelOverride({
     req,
@@ -672,6 +707,106 @@ export async function handleOpenResponsesHttpRequest(
   const rememberResponseSession = () =>
     storeResponseSession(responseId, sessionKey, responseSessionScope);
   const outputItemId = `msg_${randomUUID()}`;
+  const outputItems: OutputItem[] = [
+    createAssistantOutputItem({
+      id: outputItemId,
+      text: "",
+      status: stream ? "in_progress" : "completed",
+    }),
+  ];
+  const toolCallItemsById = new Map<
+    string,
+    { index: number; item: Extract<OutputItem, { type: "function_call" }> }
+  >();
+  const appendOutputItem = (item: OutputItem) => {
+    const index = outputItems.length;
+    outputItems.push(item);
+    return index;
+  };
+  const ensureToolCallItem = (params: { toolCallId: string; name: string; args?: unknown }) => {
+    const existing = toolCallItemsById.get(params.toolCallId);
+    if (existing) {
+      return existing;
+    }
+    const item: Extract<OutputItem, { type: "function_call" }> = {
+      type: "function_call",
+      id: params.toolCallId,
+      call_id: params.toolCallId,
+      name: params.name,
+      arguments: safeJsonStringify(params.args),
+      status: "in_progress",
+    };
+    const index = appendOutputItem(item);
+    toolCallItemsById.set(params.toolCallId, { index, item });
+    if (stream) {
+      writeSseEvent(res, {
+        type: "response.output_item.added",
+        output_index: index,
+        item,
+      });
+    }
+    return { index, item };
+  };
+  const finalizeToolCallItem = (toolCallId: string) => {
+    const existing = toolCallItemsById.get(toolCallId);
+    if (!existing) {
+      return;
+    }
+    const completedItem = { ...existing.item, status: "completed" as const };
+    outputItems[existing.index] = completedItem;
+    if (stream) {
+      writeSseEvent(res, {
+        type: "response.output_item.done",
+        output_index: existing.index,
+        item: completedItem,
+      });
+    }
+  };
+  const emitToolOutputItem = (toolCallId: string, output: unknown) => {
+    const item: Extract<OutputItem, { type: "function_call_output" }> = {
+      type: "function_call_output",
+      id: `tool_output_${randomUUID()}`,
+      call_id: toolCallId,
+      output: safeJsonStringify(output),
+      status: "completed",
+    };
+    const index = appendOutputItem(item);
+    if (stream) {
+      writeSseEvent(res, {
+        type: "response.output_item.added",
+        output_index: index,
+        item,
+      });
+      writeSseEvent(res, {
+        type: "response.output_item.done",
+        output_index: index,
+        item,
+      });
+    }
+  };
+  const emitReasoningItem = (text: string) => {
+    if (!text.trim()) {
+      return;
+    }
+    const item: Extract<OutputItem, { type: "reasoning" }> = {
+      type: "reasoning",
+      id: `reason_${randomUUID()}`,
+      ...(reasoningSummary ? { summary: text } : { content: text }),
+    };
+    const index = appendOutputItem(item);
+    if (stream) {
+      writeSseEvent(res, {
+        type: "response.output_item.added",
+        output_index: index,
+        item,
+      });
+      writeSseEvent(res, {
+        type: "response.output_item.done",
+        output_index: index,
+        item,
+      });
+    }
+  };
   const deps = createDefaultDeps();
   const abortController = new AbortController();
   const streamMaxTokens =
@@ -689,6 +824,26 @@ export async function handleOpenResponsesHttpRequest(
       : undefined;
 
   if (!stream) {
+    const unsubscribeAgentEvents = onAgentEvent((evt) => {
+      if (evt.runId !== responseId || evt.stream !== "tool") {
+        return;
+      }
+      const phase = evt.data?.phase;
+      const name = typeof evt.data?.name === "string" ? evt.data.name : "tool";
+      const toolCallId = typeof evt.data?.toolCallId === "string" ? evt.data.toolCallId : "";
+      if (!toolCallId) {
+        return;
+      }
+      if (phase === "start") {
+        ensureToolCallItem({ toolCallId, name, args: evt.data?.args });
+        return;
+      }
+      if (phase === "result") {
+        ensureToolCallItem({ toolCallId, name, args: evt.data?.args });
+        finalizeToolCallItem(toolCallId);
+        emitToolOutputItem(toolCallId, evt.data?.result);
+      }
+    });
     const stopWatchingDisconnect = watchClientDisconnect(req, res, abortController);
     try {
       const result = await runResponsesAgentCommand({
@@ -700,6 +855,14 @@ export async function handleOpenResponsesHttpRequest(
         streamParams,
         sessionKey,
         runId: responseId,
+        thinkingOnce,
+        reasoningLevel,
+        providerMetadata,
+        toolResultMaxDataBytes,
+        onReasoningStream: (payload) => {
+          const text = typeof payload.text === "string" ? payload.text : "";
+          emitReasoningItem(text);
+        },
         messageChannel,
         senderIsOwner,
         deps,
@@ -771,18 +934,17 @@ export async function handleOpenResponsesHttpRequest(
               .join("\n\n")
           : "No response from OpenClaw.";
 
+      outputItems[0] = createAssistantOutputItem({
+        id: outputItemId,
+        text: content,
+        phase: "final_answer",
+        status: "completed",
+      });
       const response = createResponseResource({
         id: responseId,
         model,
         status: "completed",
-        output: [
-          createAssistantOutputItem({
-            id: outputItemId,
-            text: content,
-            phase: "final_answer",
-            status: "completed",
-          }),
-        ],
+        output: outputItems,
         usage,
       });
 
@@ -830,6 +992,7 @@ export async function handleOpenResponsesHttpRequest(
       rememberResponseSession();
       sendJson(res, 500, response);
     } finally {
+      unsubscribeAgentEvents();
       stopWatchingDisconnect();
     }
     return true;
@@ -887,6 +1050,7 @@ export async function handleOpenResponsesHttpRequest(
       phase: finalizeRequested.status === "completed" ? "final_answer" : "commentary",
       status: "completed",
     });
+    outputItems[0] = completedItem;
 
     writeSseEvent(res, {
       type: "response.output_item.done",
@@ -898,7 +1062,7 @@ export async function handleOpenResponsesHttpRequest(
       id: responseId,
       model,
       status: finalizeRequested.status,
-      output: [completedItem],
+      output: outputItems,
       usage,
     });
 
@@ -928,11 +1092,7 @@ export async function handleOpenResponsesHttpRequest(
   writeSseEvent(res, { type: "response.in_progress", response: initialResponse });
 
   // Add output item
-  const outputItem = createAssistantOutputItem({
-    id: outputItemId,
-    text: "",
-    status: "in_progress",
-  });
+  const outputItem = outputItems[0] as Extract<OutputItem, { type: "message" }>;
 
   writeSseEvent(res, {
     type: "response.output_item.added",
@@ -981,6 +1141,25 @@ export async function handleOpenResponsesHttpRequest(
       return;
     }
 
+    if (evt.stream === "tool") {
+      const phase = evt.data?.phase;
+      const name = typeof evt.data?.name === "string" ? evt.data.name : "tool";
+      const toolCallId = typeof evt.data?.toolCallId === "string" ? evt.data.toolCallId : "";
+      if (!toolCallId) {
+        return;
+      }
+      if (phase === "start") {
+        ensureToolCallItem({ toolCallId, name, args: evt.data?.args });
+        return;
+      }
+      if (phase === "result") {
+        ensureToolCallItem({ toolCallId, name, args: evt.data?.args });
+        finalizeToolCallItem(toolCallId);
+        emitToolOutputItem(toolCallId, evt.data?.result);
+      }
+      return;
+    }
+
     if (evt.stream === "lifecycle") {
       const phase = evt.data?.phase;
       if (phase === "end" || phase === "error") {
@@ -1007,6 +1186,14 @@ export async function handleOpenResponsesHttpRequest(
         streamParams,
         sessionKey,
         runId: responseId,
+        thinkingOnce,
+        reasoningLevel,
+        providerMetadata,
+        toolResultMaxDataBytes,
+        onReasoningStream: (payload) => {
+          const text = typeof payload.text === "string" ? payload.text : "";
+          emitReasoningItem(text);
+        },
         messageChannel,
         senderIsOwner,
         deps,
@@ -1058,6 +1245,7 @@ export async function handleOpenResponsesHttpRequest(
           phase: "commentary",
           status: "completed",
         });
+        outputItems[0] = completedItem;
         writeSseEvent(res, {
           type: "response.output_item.done",
           output_index: 0,
@@ -1071,8 +1259,6 @@ export async function handleOpenResponsesHttpRequest(
         // `pendingToolCalls[0]` and hard-coded `output_index: 1`, so a turn
         // with multiple client tool calls dropped every call past the
         // first.
-        const functionCallItems: OutputItem[] = [];
-        let nextStreamOutputIndex = 1;
         for (const functionCall of pendingToolCalls) {
           const functionCallItemId = `call_${randomUUID()}`;
           const functionCallItem = createFunctionCallOutputItem({
@@ -1081,9 +1267,10 @@ export async function handleOpenResponsesHttpRequest(
             name: functionCall.name,
             arguments: functionCall.arguments,
           });
+          const functionCallIndex = appendOutputItem(functionCallItem);
           writeSseEvent(res, {
             type: "response.output_item.added",
-            output_index: nextStreamOutputIndex,
+            output_index: functionCallIndex,
             item: functionCallItem,
           });
           const completedFunctionCallItem = createFunctionCallOutputItem({
@@ -1093,20 +1280,19 @@ export async function handleOpenResponsesHttpRequest(
             arguments: functionCall.arguments,
             status: "completed",
           });
+          outputItems[functionCallIndex] = completedFunctionCallItem;
           writeSseEvent(res, {
             type: "response.output_item.done",
-            output_index: nextStreamOutputIndex,
+            output_index: functionCallIndex,
             item: completedFunctionCallItem,
           });
-          functionCallItems.push(functionCallItem);
-          nextStreamOutputIndex += 1;
         }
 
         const incompleteResponse = createResponseResource({
           id: responseId,
           model,
           status: "incomplete",
-          output: [completedItem, ...functionCallItems],
+          output: outputItems,
           usage,
         });
         closed = true;

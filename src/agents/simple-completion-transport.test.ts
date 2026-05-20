@@ -6,6 +6,7 @@ const createAnthropicVertexStreamFnForModel = vi.fn();
 const ensureCustomApiRegistered = vi.fn();
 const resolveProviderStreamFn = vi.fn();
 const buildTransportAwareSimpleStreamFn = vi.fn();
+const createOpenClawTransportStreamFnForModel = vi.fn();
 const prepareTransportAwareSimpleModel = vi.fn();
 
 vi.mock("./anthropic-vertex-stream.js", () => ({
@@ -18,6 +19,7 @@ vi.mock("./custom-api-registry.js", () => ({
 
 vi.mock("./provider-transport-stream.js", () => ({
   buildTransportAwareSimpleStreamFn,
+  createOpenClawTransportStreamFnForModel,
   prepareTransportAwareSimpleModel,
 }));
 
@@ -43,11 +45,39 @@ describe("prepareModelForSimpleCompletion", () => {
     ensureCustomApiRegistered.mockReset();
     resolveProviderStreamFn.mockReset();
     buildTransportAwareSimpleStreamFn.mockReset();
+    createOpenClawTransportStreamFnForModel.mockReset();
     prepareTransportAwareSimpleModel.mockReset();
     createAnthropicVertexStreamFnForModel.mockReturnValue("vertex-stream");
     resolveProviderStreamFn.mockReturnValue("ollama-stream");
     buildTransportAwareSimpleStreamFn.mockReturnValue(undefined);
+    createOpenClawTransportStreamFnForModel.mockReturnValue(undefined);
     prepareTransportAwareSimpleModel.mockImplementation((model) => model);
+  });
+
+  it("registers vida-responses simple completions on the OpenAI Responses transport", () => {
+    const model: Model<"vida-responses"> = {
+      id: "agent-model",
+      name: "Agent Model",
+      api: "vida-responses",
+      provider: "vida-123",
+      baseUrl: "https://copilot.vida.dev/openai/v1",
+      reasoning: true,
+      input: ["text"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 200000,
+      maxTokens: 8192,
+    };
+
+    createOpenClawTransportStreamFnForModel.mockReturnValueOnce("vida-stream");
+
+    const result = prepareModelForSimpleCompletion({ model });
+
+    expect(createOpenClawTransportStreamFnForModel).toHaveBeenCalledWith(model, {
+      cfg: undefined,
+    });
+    expect(ensureCustomApiRegistered).toHaveBeenCalledWith("vida-responses", "vida-stream");
+    expect(resolveProviderStreamFn).not.toHaveBeenCalled();
+    expect(result).toBe(model);
   });
 
   it("registers the configured Ollama transport and keeps the original api", () => {

@@ -2106,10 +2106,12 @@ export async function runEmbeddedAttempt(
         allowSyntheticToolResults: transcriptPolicy.allowSyntheticToolResults,
         missingToolResultText:
           params.model.api === "openai-responses" ||
+          params.model.api === "vida-responses" ||
           params.model.api === "azure-openai-responses" ||
           params.model.api === "openai-codex-responses"
             ? "aborted"
             : undefined,
+        providerMetadata: params.providerMetadata,
         allowedToolNames: replayAllowedToolNames,
         suppressNextUserMessagePersistence: params.suppressNextUserMessagePersistence,
         suppressTranscriptOnlyAssistantPersistence:
@@ -3183,6 +3185,7 @@ export async function runEmbeddedAttempt(
           reasoningMode: params.reasoningLevel ?? "off",
           thinkingLevel: params.thinkLevel,
           toolResultFormat: params.toolResultFormat,
+          toolResultMaxDataBytes: params.toolResultMaxDataBytes,
           shouldEmitToolResult: params.shouldEmitToolResult,
           shouldEmitToolOutput: params.shouldEmitToolOutput,
           onToolResult: params.onToolResult,

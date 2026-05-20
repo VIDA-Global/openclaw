@@ -237,6 +237,26 @@ function stringifyJsonLike(value: unknown, fallback = ""): string {
   return fallback;
 }
 
+function parseFunctionCallArgumentsSafe(raw: unknown, fallback: unknown = {}): unknown {
+  if (raw && typeof raw === "object") {
+    return raw;
+  }
+  if (typeof raw !== "string" || raw.length === 0) {
+    return fallback;
+  }
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    // Responses streams can expose partial or malformed argument JSON.
+  }
+  try {
+    const parsed = parseStreamingJson(raw);
+    return parsed ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 function getServiceTierCostMultiplier(serviceTier: ResponseCreateParamsStreaming["service_tier"]) {
   switch (serviceTier) {
     case "flex":
@@ -1419,7 +1439,7 @@ async function processResponsesStream(
     } else if (type === "response.function_call_arguments.delta") {
       if (currentItem?.type === "function_call" && currentBlock?.type === "toolCall") {
         currentBlock.partialJson = `${stringifyJsonLike(currentBlock.partialJson)}${stringifyJsonLike(event.delta)}`;
-        currentBlock.arguments = parseStreamingJson(stringifyJsonLike(currentBlock.partialJson));
+        currentBlock.arguments = parseFunctionCallArgumentsSafe(currentBlock.partialJson);
         stream.push({
           type: "toolcall_delta",
           contentIndex: blockIndex(),
@@ -1476,10 +1496,16 @@ async function processResponsesStream(
         });
         currentBlock = null;
       } else if (item.type === "function_call") {
+        const fallbackArgs =
+          currentBlock?.type === "toolCall" &&
+          currentBlock.arguments &&
+          typeof currentBlock.arguments === "object"
+            ? currentBlock.arguments
+            : {};
         const args =
           currentBlock?.type === "toolCall" && currentBlock.partialJson
-            ? parseStreamingJson(stringifyJsonLike(currentBlock.partialJson, "{}"))
-            : parseStreamingJson(stringifyJsonLike(item.arguments, "{}"));
+            ? parseFunctionCallArgumentsSafe(currentBlock.partialJson, fallbackArgs)
+            : parseFunctionCallArgumentsSafe(item.arguments, fallbackArgs);
         stream.push({
           type: "toolcall_end",
           contentIndex: blockIndex(),

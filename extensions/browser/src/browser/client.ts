@@ -11,9 +11,11 @@ import type { BrowserDoctorReport } from "./doctor.js";
 export type { BrowserStatus, BrowserTab, BrowserTransport } from "./client.types.js";
 export type { BrowserDoctorCheck, BrowserDoctorReport } from "./doctor.js";
 
-const BROWSER_STATUS_REQUEST_TIMEOUT_MS = 7_500;
 const BROWSER_DOCTOR_REQUEST_TIMEOUT_MS = 7_500;
 const BROWSER_DEEP_DOCTOR_REQUEST_TIMEOUT_MS = 10_000;
+const DEFAULT_BROWSER_READ_TIMEOUT_MS = 10_000;
+const DEFAULT_BROWSER_READ_RETRY_COUNT = 1;
+const DEFAULT_BROWSER_READ_RETRY_DELAY_MS = 1_500;
 
 export type ProfileStatus = {
   name: string;
@@ -70,17 +72,71 @@ export type SnapshotResult =
       browserState?: unknown;
     };
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeReadTimeoutMs(value: number | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(1, Math.floor(value))
+    : fallback;
+}
+
+function isBrowserControlReadRetryError(err: unknown): boolean {
+  const msg =
+    err instanceof Error
+      ? err.message.toLowerCase()
+      : typeof err === "string"
+        ? err.toLowerCase()
+        : "";
+  return (
+    (msg.includes("browser control") || msg.includes("openclaw browser")) &&
+    (msg.includes("timed out") || msg.includes("timeout") || msg.includes("cancelled"))
+  );
+}
+
+async function withBrowserReadRetry<T>(
+  run: () => Promise<T>,
+  opts?: { retryCount?: number; retryDelayMs?: number },
+): Promise<T> {
+  const retryCount =
+    typeof opts?.retryCount === "number" && Number.isFinite(opts.retryCount)
+      ? Math.max(0, Math.floor(opts.retryCount))
+      : DEFAULT_BROWSER_READ_RETRY_COUNT;
+  const retryDelayMs =
+    typeof opts?.retryDelayMs === "number" && Number.isFinite(opts.retryDelayMs)
+      ? Math.max(0, Math.floor(opts.retryDelayMs))
+      : DEFAULT_BROWSER_READ_RETRY_DELAY_MS;
+
+  let attempt = 0;
+  while (true) {
+    try {
+      return await run();
+    } catch (err) {
+      if (!isBrowserControlReadRetryError(err) || attempt >= retryCount) {
+        throw err;
+      }
+      attempt += 1;
+      if (retryDelayMs > 0) {
+        await sleep(retryDelayMs);
+      }
+    }
+  }
+}
+
 export async function browserStatus(
   baseUrl?: string,
-  opts?: { profile?: string; timeoutMs?: number },
+  opts?: { profile?: string; timeoutMs?: number; retryCount?: number; retryDelayMs?: number },
 ): Promise<BrowserStatus> {
   const q = buildProfileQuery(opts?.profile);
-  return await fetchBrowserJson<BrowserStatus>(withBaseUrl(baseUrl, `/${q}`), {
-    timeoutMs:
-      typeof opts?.timeoutMs === "number" && Number.isFinite(opts.timeoutMs)
-        ? Math.max(1, Math.floor(opts.timeoutMs))
-        : BROWSER_STATUS_REQUEST_TIMEOUT_MS,
-  });
+  const timeoutMs = normalizeReadTimeoutMs(opts?.timeoutMs, DEFAULT_BROWSER_READ_TIMEOUT_MS);
+  return await withBrowserReadRetry(
+    async () =>
+      await fetchBrowserJson<BrowserStatus>(withBaseUrl(baseUrl, `/${q}`), {
+        timeoutMs,
+      }),
+    { retryCount: opts?.retryCount, retryDelayMs: opts?.retryDelayMs },
+  );
 }
 
 export async function browserDoctor(
@@ -104,16 +160,15 @@ export async function browserDoctor(
 
 export async function browserProfiles(
   baseUrl?: string,
-  opts?: { timeoutMs?: number },
+  opts?: { timeoutMs?: number; retryCount?: number; retryDelayMs?: number },
 ): Promise<ProfileStatus[]> {
-  const res = await fetchBrowserJson<{ profiles: ProfileStatus[] }>(
-    withBaseUrl(baseUrl, `/profiles`),
-    {
-      timeoutMs:
-        typeof opts?.timeoutMs === "number" && Number.isFinite(opts.timeoutMs)
-          ? Math.max(1, Math.floor(opts.timeoutMs))
-          : 3000,
-    },
+  const timeoutMs = normalizeReadTimeoutMs(opts?.timeoutMs, DEFAULT_BROWSER_READ_TIMEOUT_MS);
+  const res = await withBrowserReadRetry(
+    async () =>
+      await fetchBrowserJson<{ profiles: ProfileStatus[] }>(withBaseUrl(baseUrl, `/profiles`), {
+        timeoutMs,
+      }),
+    { retryCount: opts?.retryCount, retryDelayMs: opts?.retryDelayMs },
   );
   return res.profiles ?? [];
 }
@@ -219,17 +274,17 @@ export async function browserDeleteProfile(
 
 export async function browserTabs(
   baseUrl?: string,
-  opts?: { profile?: string; timeoutMs?: number },
+  opts?: { profile?: string; timeoutMs?: number; retryCount?: number; retryDelayMs?: number },
 ): Promise<BrowserTab[]> {
   const q = buildProfileQuery(opts?.profile);
-  const res = await fetchBrowserJson<{ running: boolean; tabs: BrowserTab[] }>(
-    withBaseUrl(baseUrl, `/tabs${q}`),
-    {
-      timeoutMs:
-        typeof opts?.timeoutMs === "number" && Number.isFinite(opts.timeoutMs)
-          ? Math.max(1, Math.floor(opts.timeoutMs))
-          : 3000,
-    },
+  const timeoutMs = normalizeReadTimeoutMs(opts?.timeoutMs, DEFAULT_BROWSER_READ_TIMEOUT_MS);
+  const res = await withBrowserReadRetry(
+    async () =>
+      await fetchBrowserJson<{ running: boolean; tabs: BrowserTab[] }>(
+        withBaseUrl(baseUrl, `/tabs${q}`),
+        { timeoutMs },
+      ),
+    { retryCount: opts?.retryCount, retryDelayMs: opts?.retryDelayMs },
   );
   return res.tabs ?? [];
 }

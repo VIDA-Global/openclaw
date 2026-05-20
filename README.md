@@ -94,6 +94,61 @@ Works with npm, pnpm, or bun.
 
 Model note: while many providers and models are supported, prefer a current flagship model from the provider you trust and already use. See [Onboarding](https://docs.openclaw.ai/start/onboarding).
 
+## VIDA Fork Deltas
+
+This repository tracks upstream OpenClaw releases and carries a focused VIDA downstream patch set. Treat this section as the preservation contract for future upstream merges and release-tag syncs.
+
+- Release-tag sync rule: start from the target upstream release tag, preserve the deltas below on that tag line, validate them, then sync the resolved release line back into the downstream main branch.
+- Full fork-delta inventory: review `VIDA_FORK_DIFF_REPORT.md`, historical `vida-v*` tags, and substantive fork-only commits before dropping any behavior.
+- Diff references: `git log --oneline upstream/main..main` and `git diff upstream/main...main`.
+
+### Product/runtime deltas
+
+- `vida-responses` model API compatibility:
+  VIDA routes OpenAI Responses-compatible hosted traffic through the current OpenClaw transport architecture, including simple-completion registration and Responses replay-history repair.
+  Runtime files: `src/config/types.models.ts`, `src/agents/provider-transport-stream.ts`, `src/agents/simple-completion-transport.ts`, `src/agents/pi-embedded-runner/replay-history.ts`.
+  Direct tests: `src/agents/provider-transport-stream.test.ts`, `src/agents/simple-completion-transport.test.ts`, `src/config/schema.test.ts`, `src/agents/pi-embedded-runner.sanitize-session-history.test.ts`.
+- OpenResponses and embedded-runner hosted-run parity:
+  VIDA needs provider metadata, streamed reasoning, runtime tool calls, and bounded tool-result payloads to survive the hop from the OpenResponses HTTP layer into embedded agent execution.
+  Runtime files: `src/gateway/openresponses-http.ts`, `src/gateway/open-responses.schema.ts`, `src/agents/command/types.ts`, `src/agents/command/attempt-execution.ts`, `src/agents/pi-embedded-runner/run.ts`, `src/agents/pi-embedded-runner/run/params.ts`, `src/agents/pi-embedded-runner/run/attempt.ts`, `src/agents/pi-embedded-subscribe.types.ts`, `src/agents/pi-embedded-subscribe.tools.ts`, `src/agents/pi-embedded-subscribe.handlers.tools.ts`, `src/agents/session-tool-result-guard-wrapper.ts`, `src/config/types.gateway.ts`, `src/config/zod-schema.ts`.
+  Direct tests: `src/gateway/openresponses-http.test.ts`, `src/gateway/openresponses-parity.test.ts`, `src/agents/pi-embedded-subscribe.tools.test.ts`, `src/agents/session-tool-result-guard.tool-result-persist-hook.test.ts`.
+- OpenAI Responses malformed tool-call argument hardening:
+  VIDA preserves function-call streams even when partial or final argument JSON is malformed.
+  Runtime file: `src/agents/openai-transport-stream.ts`.
+  Direct test: `src/agents/openai-transport-stream.test.ts`.
+- Plugin request attribution for plugin-owned VIDA OpenAI traffic:
+  Plugin lifecycle hooks that call `${VIDA_API_BASE_URL}/openai/v1` carry `x-openclaw-agent-id` and `x-openclaw-session-key` without affecting unrelated fetches.
+  Runtime files: `src/plugins/hook-runner-global.ts`, `src/plugins/hooks.ts`, `src/plugins/runtime/request-attribution-fetch.ts`, `src/plugins/runtime/request-attribution-scope.ts`.
+  Direct tests: `src/plugins/hooks.request-attribution.test.ts`, `src/plugins/runtime/request-attribution-fetch.test.ts`, `src/plugins/runtime/request-attribution-scope.test.ts`.
+- Browser reliability patches:
+  VIDA browser-hosted workflows use bounded read retries, explicit read timeouts, and action-path retry hints without turning non-action timeouts into unbounded retries.
+  Runtime files: `extensions/browser/src/browser/client.ts`, `extensions/browser/src/browser/client-fetch.ts`.
+  Direct tests: `extensions/browser/src/browser/client.test.ts`, `extensions/browser/src/browser/client-fetch.loopback-auth.test.ts`.
+- WhatsApp/VIDA session behavior:
+  VIDA relies on a stable Baileys browser identity and nested disconnect status extraction.
+  Runtime files: `extensions/whatsapp/src/session.ts`, `extensions/whatsapp/src/session-errors.ts`.
+  Direct tests: `extensions/whatsapp/src/session.test.ts`, `extensions/whatsapp/src/session-errors.test.ts`.
+- Synology Chat public API surface:
+  VIDA keeps Synology setup/webhook utilities available through the extension API barrel and guards against plugin-SDK/API two-way import cycles.
+  Runtime files: `extensions/synology-chat/api.ts`, `src/channels/plugins/contracts/channel-import-guardrails.test.ts`.
+  Direct test: `src/channels/plugins/contracts/channel-import-guardrails.test.ts`.
+
+### Fork operations deltas
+
+- Upstream sync automation: `scripts/sync-upstream-main.sh`, `scripts/sync-upstream-release.sh`.
+- VIDA fork release validation and Docker alignment checks: `scripts/verify-vida-release.sh`.
+- VIDA sync runbook and fork-tag workflow: `scripts/README.vida-release-sync.md`.
+
+These scripts exist because VIDA downstream Docker and provisioner integrations consume fork tags directly. A release-tag merge must preserve fork patches, emit predictable `vida-*` tags, and verify Docker ref/date-tag compatibility before publish.
+
+Downstream contracts to revalidate on every release-tag merge:
+
+- `openclaw-docker`: Docker/browser patch layer and image tag derivation.
+- `vida-openclaw-provisioner`: browser profile assignment, slot routing, external CDP URLs, and noVNC ticket contract.
+- `vida.live`: signed browser access tickets and launch URLs built from provisioner-published metadata.
+
+Update this section whenever a new VIDA fork-only patch is merged.
+
 ## Install (recommended)
 
 Runtime: **Node 24 (recommended) or Node 22.19+**.

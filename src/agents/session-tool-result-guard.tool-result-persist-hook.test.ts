@@ -139,6 +139,34 @@ describe("tool_result_persist hook", () => {
     expect(toolResult.details.originalDetailsBytesAtLeast).toBeGreaterThan(8_192);
   });
 
+  it("merges provider metadata into persisted messages", () => {
+    const sm = guardSessionManager(SessionManager.inMemory(), {
+      agentId: "main",
+      sessionKey: "main",
+      providerMetadata: {
+        vida: { ignoreOnProviderRelay: true },
+      },
+    });
+    const appendMessage = sm.appendMessage.bind(sm) as unknown as (message: AgentMessage) => void;
+
+    appendMessage({
+      role: "assistant",
+      providerMetadata: {
+        existing: "kept",
+      },
+      content: [{ type: "text", text: "ok" }],
+    } as AgentMessage);
+
+    const messages = sm
+      .getEntries()
+      .filter((e) => e.type === "message")
+      .map((e) => (e as { message: AgentMessage }).message);
+    expect((messages[0] as { providerMetadata?: unknown }).providerMetadata).toEqual({
+      existing: "kept",
+      vida: { ignoreOnProviderRelay: true },
+    });
+  });
+
   it("redacts small toolResult details before persistence", () => {
     const tokenValue = "abcdefghijklmnopqrstuvwx1234567890";
     const bearerValue = "bearerdiagnosticvalue1234567890";

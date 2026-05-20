@@ -753,19 +753,35 @@ function matchesInstalledPluginRecord(params: {
   if (!record) {
     return false;
   }
-  const resolvedCandidateSource = resolveUserPath(params.candidate.source, params.env);
-  const candidateSource = safeRealpathSync(resolvedCandidateSource) ?? resolvedCandidateSource;
+  const resolveInstallMatchPath = (entry: string): string => {
+    const resolved = resolveUserPath(entry, params.env);
+    const real = safeRealpathSync(resolved);
+    if (real) {
+      return real;
+    }
+    const parentReal = safeRealpathSync(path.dirname(resolved));
+    return parentReal ? path.join(parentReal, path.basename(resolved)) : resolved;
+  };
+  const candidatePaths = [
+    params.candidate.source,
+    params.candidate.rootDir,
+    params.candidate.packageDir,
+  ]
+    .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+    .map(resolveInstallMatchPath);
   const trackedPaths = [record.installPath, record.sourcePath]
     .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
-    .map((entry) => {
-      const resolved = resolveUserPath(entry, params.env);
-      return safeRealpathSync(resolved) ?? resolved;
-    });
-  if (trackedPaths.length === 0) {
+    .map(resolveInstallMatchPath);
+  if (candidatePaths.length === 0 || trackedPaths.length === 0) {
     return false;
   }
   return trackedPaths.some((trackedPath) => {
-    return candidateSource === trackedPath || isPathInside(trackedPath, candidateSource);
+    return candidatePaths.some(
+      (candidatePath) =>
+        candidatePath === trackedPath ||
+        isPathInside(trackedPath, candidatePath) ||
+        isPathInside(candidatePath, trackedPath),
+    );
   });
 }
 

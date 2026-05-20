@@ -100,6 +100,7 @@ type GuardedFetchPresetOptions = Omit<
 
 const DEFAULT_MAX_REDIRECTS = 3;
 const OPENCLAW_DEBUG_PROXY_ENABLED = "OPENCLAW_DEBUG_PROXY_ENABLED";
+const DEBUG_PROXY_FETCH_PATCH_KEY = Symbol.for("openclaw.debugProxy.fetchPatch");
 
 function isTruthyEnvValue(value: string | undefined): boolean {
   return value === "1" || value === "true" || value === "yes" || value === "on";
@@ -133,6 +134,10 @@ function resolveGuardedFetchMode(params: GuardedFetchOptions): GuardedFetchMode 
 
 function isManagedProxyActive(): boolean {
   return process.env["OPENCLAW_PROXY_ACTIVE"] === "1";
+}
+
+function isDebugProxyGlobalFetchPatchActive(): boolean {
+  return Boolean((globalThis as Record<PropertyKey, unknown>)[DEBUG_PROXY_FETCH_PATCH_KEY]);
 }
 
 function assertExplicitProxySupportsPinnedDns(
@@ -251,7 +256,11 @@ async function captureGuardedFetchExchange(params: {
   capture: GuardedFetchOptions["capture"];
   auditContext?: string;
 }): Promise<void> {
-  if (params.capture === false || !isTruthyEnvValue(process.env[OPENCLAW_DEBUG_PROXY_ENABLED])) {
+  if (
+    params.capture === false ||
+    !isTruthyEnvValue(process.env[OPENCLAW_DEBUG_PROXY_ENABLED]) ||
+    isDebugProxyGlobalFetchPatchActive()
+  ) {
     return;
   }
   const { captureHttpExchange } = await import("../../proxy-capture/runtime.js");
@@ -478,6 +487,7 @@ export async function fetchWithSsrFGuard(params: GuardedFetchOptions): Promise<G
             fetchImpl: params.fetchImpl,
             globalFetch: globalThis.fetch,
           })) ||
+        isDebugProxyGlobalFetchPatchActive() ||
         isUsingMockedFetch;
       // Explicit caller stubs and test-installed fetch mocks should win.
       // Otherwise, fall back to undici's fetch whenever we attach a dispatcher,

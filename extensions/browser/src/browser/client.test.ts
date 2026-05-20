@@ -11,6 +11,7 @@ import {
 import {
   browserDoctor,
   browserOpenTab,
+  browserProfiles,
   browserSnapshot,
   browserStatus,
   browserTabs,
@@ -63,7 +64,48 @@ describe("browser client", () => {
 
   it("adds useful cancellation messaging for abort-like failures", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("aborted")));
-    await expect(browserStatus("http://127.0.0.1:18791")).rejects.toThrow(/cancelled/i);
+    await expect(browserStatus("http://127.0.0.1:18791", { retryCount: 0 })).rejects.toThrow(
+      /cancelled/i,
+    );
+  });
+
+  it("retries read calls once on timeout-like failures", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("timed out"))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          running: true,
+          tabs: [{ targetId: "t1", title: "T", url: "https://x" }],
+        }),
+      } as unknown as Response);
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      browserTabs("http://127.0.0.1:18791", {
+        retryDelayMs: 0,
+      }),
+    ).resolves.toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses timeout overrides for read calls", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("timed out")));
+
+    await expect(
+      browserTabs("http://127.0.0.1:18791", {
+        timeoutMs: 6789,
+        retryCount: 0,
+      }),
+    ).rejects.toThrow(/6789ms/i);
+    await expect(
+      browserProfiles("http://127.0.0.1:18791", {
+        timeoutMs: 4321,
+        retryCount: 0,
+      }),
+    ).rejects.toThrow(/4321ms/i);
   });
 
   it("surfaces non-2xx responses with body text", async () => {
@@ -338,7 +380,7 @@ describe("browser client", () => {
     expect(urls.some((url) => url.endsWith("/doctor"))).toBe(true);
     expect(urls.some((url) => url.endsWith("/doctor?profile=openclaw&deep=true"))).toBe(true);
     const status = calls.find((c) => c.url.endsWith("/"));
-    expect(status?.init?.timeoutMs).toBe(7_500);
+    expect(status?.init?.timeoutMs).toBe(10_000);
     const doctor = calls.find((c) => c.url.endsWith("/doctor"));
     expect(doctor?.init?.timeoutMs).toBe(7_500);
     const deepDoctor = calls.find((c) => c.url.endsWith("/doctor?profile=openclaw&deep=true"));

@@ -243,3 +243,5 @@ extensions/**/.openclaw-runtime-deps-stamp.json
 /.opengrep-out/
 /.crabbox-artifacts
 .comux*
+
+VIDA_FORK_DIFF_REPORT.md

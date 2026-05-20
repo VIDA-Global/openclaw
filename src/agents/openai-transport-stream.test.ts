@@ -140,6 +140,60 @@ describe("openai transport stream", () => {
     ).rejects.toThrow(/did not deliver a first event within 1ms after HTTP streaming headers/);
   });
 
+  it("keeps Responses function-call streams alive when argument JSON is malformed", async () => {
+    const model = createAzureResponsesModel();
+    const output = createResponsesAssistantOutput(model);
+    const pushed: unknown[] = [];
+
+    await testing.processResponsesStream(
+      streamChunks([
+        {
+          type: "response.output_item.added",
+          item: {
+            type: "function_call",
+            id: "fc_malformed",
+            call_id: "call_malformed",
+            name: "broken_tool",
+            arguments: "",
+          },
+        },
+        {
+          type: "response.function_call_arguments.delta",
+          delta: "{not valid json",
+        },
+        {
+          type: "response.output_item.done",
+          item: {
+            type: "function_call",
+            id: "fc_malformed",
+            call_id: "call_malformed",
+            name: "broken_tool",
+            arguments: "{not valid json",
+          },
+        },
+      ]),
+      output,
+      { push: (event: unknown) => pushed.push(event) },
+      model,
+    );
+
+    expect(output.content).toMatchObject([
+      {
+        type: "toolCall",
+        id: "call_malformed|fc_malformed",
+        name: "broken_tool",
+        arguments: {},
+      },
+    ]);
+    const toolCallEnd = pushed.find(
+      (event): event is { type: "toolcall_end"; toolCall: { arguments: unknown } } =>
+        !!event &&
+        typeof event === "object" &&
+        (event as Record<string, unknown>).type === "toolcall_end",
+    );
+    expect(toolCallEnd?.toolCall.arguments).toEqual({});
+  });
+
   it("observes detail-less Responses failures without leaking request ids", async () => {
     const model = createAzureResponsesModel();
     const event = {

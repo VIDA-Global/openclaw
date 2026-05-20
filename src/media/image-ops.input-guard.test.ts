@@ -179,6 +179,20 @@ describe("image input pixel guard", () => {
         console.warn(`Skipping HEIC conversion fixture: ${result.stderr || result.stdout}`);
         return;
       }
+      const directJpegPath = path.join(tempDir, "direct.jpg");
+      const directConvert = spawnSync(
+        "/usr/bin/sips",
+        ["-s", "format", "jpeg", heicPath, "--out", directJpegPath],
+        {
+          encoding: "utf8",
+        },
+      );
+      if (directConvert.status !== 0) {
+        console.warn(
+          `Skipping HEIC conversion fixture: ${directConvert.stderr || directConvert.stdout}`,
+        );
+        return;
+      }
 
       const jpeg = await convertHeicToJpeg(await fs.readFile(heicPath));
 

@@ -217,6 +217,20 @@ describe("fetchBrowserJson loopback auth", () => {
     });
   });
 
+  it("uses bounded-retry guidance for dispatcher action timeouts", async () => {
+    mocks.dispatch.mockRejectedValueOnce(new Error("locator.click timed out"));
+
+    await expectThrownBrowserFetchError(() => fetchBrowserJson<{ ok: boolean }>("/act"), {
+      contains: [
+        "locator.click timed out",
+        "Do NOT blindly retry in a loop",
+        'snapshotFormat="ai"',
+        'refs="aria"',
+      ],
+      omits: ["Do NOT retry the browser tool"],
+    });
+  });
+
   it("preserves dispatcher abort context without no-retry hint", async () => {
     mocks.dispatch.mockRejectedValueOnce(new DOMException("operation aborted", "AbortError"));
 

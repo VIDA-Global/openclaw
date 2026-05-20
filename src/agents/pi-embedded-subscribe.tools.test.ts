@@ -198,14 +198,38 @@ describe("sanitizeToolResult", () => {
 
   it("preserves image content stripping behavior", () => {
     const result = {
-      content: [{ type: "image", data: "base64imagedata", mimeType: "image/png" }],
+      content: [{ type: "image", data: "aGk=", mimeType: "image/png" }],
     };
     const sanitized = sanitizeToolResult(result) as {
       content: Array<{ data?: string; bytes?: number; omitted?: boolean }>;
     };
     expect(sanitized.content[0].data).toBeUndefined();
     expect(sanitized.content[0].omitted).toBe(true);
-    expect(sanitized.content[0].bytes).toBe("base64imagedata".length);
+    expect(sanitized.content[0].bytes).toBe(2);
+  });
+
+  it("retains small base64 data when a decoded byte cap allows it", () => {
+    const result = {
+      content: [{ type: "image", data: "aGVsbG8=", mimeType: "image/png" }],
+    };
+    const sanitized = sanitizeToolResult(result, { maxDataBytes: 5 }) as {
+      content: Array<{ data?: string; bytes?: number; omitted?: boolean }>;
+    };
+    expect(sanitized.content[0].data).toBe("aGVsbG8=");
+    expect(sanitized.content[0].omitted).toBeUndefined();
+    expect(sanitized.content[0].bytes).toBeUndefined();
+  });
+
+  it("omits oversized base64 data when a decoded byte cap rejects it", () => {
+    const result = {
+      content: [{ type: "file", data: "aGVsbG8=", mimeType: "text/plain" }],
+    };
+    const sanitized = sanitizeToolResult(result, { maxDataBytes: 4 }) as {
+      content: Array<{ data?: string; bytes?: number; omitted?: boolean }>;
+    };
+    expect(sanitized.content[0].data).toBeUndefined();
+    expect(sanitized.content[0].omitted).toBe(true);
+    expect(sanitized.content[0].bytes).toBe(5);
   });
 
   it("redacts secrets inside result.details (e.g. exec aggregated stdout)", () => {

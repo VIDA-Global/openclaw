@@ -5,6 +5,7 @@ import { ensureCustomApiRegistered } from "./custom-api-registry.js";
 import { registerProviderStreamForModel } from "./provider-stream.js";
 import {
   buildTransportAwareSimpleStreamFn,
+  createOpenClawTransportStreamFnForModel,
   prepareTransportAwareSimpleModel,
 } from "./provider-transport-stream.js";
 
@@ -19,8 +20,17 @@ export function prepareModelForSimpleCompletion<TApi extends Api>(params: {
 }): Model<Api> {
   const { model, cfg } = params;
   // Only provider-owned custom APIs need runtime stream registration here.
-  if (!getApiProvider(model.api) && registerProviderStreamForModel({ model, cfg })) {
-    return model;
+  if (!getApiProvider(model.api)) {
+    if (model.api === "vida-responses") {
+      const streamFn = createOpenClawTransportStreamFnForModel(model as Model<Api>, { cfg });
+      if (streamFn) {
+        ensureCustomApiRegistered(model.api, streamFn);
+        return model;
+      }
+    }
+    if (registerProviderStreamForModel({ model, cfg })) {
+      return model;
+    }
   }
 
   const transportAwareModel = prepareTransportAwareSimpleModel(model, { cfg });

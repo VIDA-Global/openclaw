@@ -194,6 +194,7 @@ type ToolHandlerParams = Pick<
   | "sessionId"
   | "agentId"
   | "toolResultFormat"
+  | "toolResultMaxDataBytes"
   | "toolProgressDetail"
 >;
 

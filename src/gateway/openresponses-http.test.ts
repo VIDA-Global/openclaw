@@ -841,6 +841,119 @@ describe("OpenResponses HTTP API (e2e)", () => {
     }
   });
 
+  it("forwards provider metadata, reasoning options, and tool-result caps", async () => {
+    const config = {
+      gateway: {
+        http: {
+          endpoints: {
+            responses: {
+              enabled: true,
+              toolResultMaxDataBytes: 3210,
+            },
+          },
+        },
+      },
+    };
+    await writeGatewayConfig(config);
+
+    const port = await getFreePort();
+    const server = await startServer(port, { openResponsesEnabled: true });
+    try {
+      agentCommand.mockClear();
+      agentCommand.mockResolvedValueOnce({
+        payloads: [{ text: "ok" }],
+      } as never);
+      const providerMetadata = {
+        vida: { ignoreOnProviderRelay: true, traceId: "trace-123" },
+      };
+
+      const res = await postResponses(port, {
+        model: "openclaw",
+        input: "hi",
+        reasoning: { effort: "high", summary: "auto" },
+        provider_metadata: providerMetadata,
+      });
+
+      expect(res.status).toBe(200);
+      const opts = firstAgentOpts() as {
+        thinkingOnce?: string;
+        reasoningLevel?: string;
+        providerMetadata?: Record<string, unknown>;
+        toolResultMaxDataBytes?: number;
+      };
+      expect(opts.thinkingOnce).toBe("high");
+      expect(opts.reasoningLevel).toBe("stream");
+      expect(opts.providerMetadata).toEqual(providerMetadata);
+      expect(opts.toolResultMaxDataBytes).toBe(3210);
+      await ensureResponseConsumed(res);
+    } finally {
+      await server.close({ reason: "openresponses provider metadata forwarding test done" });
+    }
+  });
+
+  it("streams reasoning and runtime tool output items", async () => {
+    const port = enabledPort;
+    agentCommand.mockClear();
+    agentCommand.mockImplementationOnce((async (opts: unknown) => {
+      const runId = (opts as { runId?: string }).runId ?? "";
+      await (
+        opts as { onReasoningStream?: (payload: { text?: string }) => void | Promise<void> }
+      ).onReasoningStream?.({ text: "thinking..." });
+      emitAgentEvent({
+        runId,
+        stream: "tool",
+        data: {
+          phase: "start",
+          name: "browser",
+          toolCallId: "call_tool_1",
+          args: { action: "open", targetUrl: "https://example.com" },
+        },
+      });
+      emitAgentEvent({
+        runId,
+        stream: "tool",
+        data: {
+          phase: "result",
+          name: "browser",
+          toolCallId: "call_tool_1",
+          result: {
+            content: [{ type: "text", text: "ok" }],
+            ok: true,
+          },
+        },
+      });
+      return { payloads: [{ text: "hello" }] } as never;
+    }) as never);
+
+    const res = await postResponses(port, {
+      stream: true,
+      model: "openclaw",
+      input: "hi",
+      reasoning: { summary: "auto" },
+    });
+
+    expect(res.status).toBe(200);
+    const events = parseSseEvents(await res.text());
+    const addedItems = events
+      .filter((event) => event.event === "response.output_item.added")
+      .map((event) => (parseSseData(event) as { item?: { type?: string; summary?: string } }).item)
+      .filter((item): item is { type?: string; summary?: string } => Boolean(item));
+    expect(addedItems.map((item) => item.type)).toEqual(
+      expect.arrayContaining(["message", "reasoning", "function_call", "function_call_output"]),
+    );
+    expect(addedItems.find((item) => item.type === "reasoning")?.summary).toBe("thinking...");
+
+    const completed = findSseEvent(events, "response.completed");
+    const response = (
+      parseSseData(completed) as {
+        response?: { output?: Array<Record<string, unknown>> };
+      }
+    ).response;
+    expect(response?.output?.map((item) => item.type)).toEqual(
+      expect.arrayContaining(["message", "reasoning", "function_call", "function_call_output"]),
+    );
+  });
+
   it("maps provider format failures to OpenResponses 400 failed responses", async () => {
     const port = enabledPort;
 

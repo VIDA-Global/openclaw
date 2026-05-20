@@ -31,6 +31,7 @@ export function guardSessionManager(
     inputProvenance?: InputProvenance;
     allowSyntheticToolResults?: boolean;
     missingToolResultText?: string;
+    providerMetadata?: Record<string, unknown>;
     allowedToolNames?: Iterable<string>;
     suppressNextUserMessagePersistence?: boolean;
     suppressTranscriptOnlyAssistantPersistence?: boolean;
@@ -46,6 +47,29 @@ export function guardSessionManager(
   if (typeof (sessionManager as GuardedSessionManager).flushPendingToolResults === "function") {
     return sessionManager as GuardedSessionManager;
   }
+
+  const mergeProviderMetadata = (message: AgentMessage): AgentMessage => {
+    const providerMetadata = opts?.providerMetadata;
+    if (!providerMetadata || Object.keys(providerMetadata).length === 0) {
+      return message;
+    }
+    if (!message || typeof message !== "object" || Array.isArray(message)) {
+      return message;
+    }
+    const record = message as unknown as Record<string, unknown>;
+    const existing = record.providerMetadata;
+    const existingProviderMetadata =
+      existing && typeof existing === "object" && !Array.isArray(existing)
+        ? (existing as Record<string, unknown>)
+        : {};
+    return {
+      ...record,
+      providerMetadata: {
+        ...existingProviderMetadata,
+        ...providerMetadata,
+      },
+    } as unknown as AgentMessage;
+  };
 
   const hookRunner = getGlobalHookRunner();
   const beforeMessageWrite = (event: {
@@ -100,7 +124,7 @@ export function guardSessionManager(
   const guard = installSessionToolResultGuard(sessionManager, {
     sessionKey: opts?.sessionKey,
     transformMessageForPersistence: (message) =>
-      applyInputProvenanceToUserMessage(message, opts?.inputProvenance),
+      applyInputProvenanceToUserMessage(mergeProviderMetadata(message), opts?.inputProvenance),
     transformToolResultForPersistence: transform,
     allowSyntheticToolResults: opts?.allowSyntheticToolResults,
     missingToolResultText: opts?.missingToolResultText,

@@ -45,6 +45,13 @@ describe("provider transport stream contracts", () => {
         alias: "openclaw-openai-responses-transport",
       },
       {
+        api: "vida-responses" as const,
+        provider: "vida",
+        id: "gpt-5.4",
+        baseUrl: "https://api.vida.dev/openai/v1",
+        alias: "openclaw-openai-responses-transport",
+      },
+      {
         api: "openai-codex-responses" as const,
         provider: "openai-codex",
         id: "codex-mini-latest",

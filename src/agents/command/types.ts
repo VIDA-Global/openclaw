@@ -2,6 +2,7 @@ import type { AgentInternalEvent } from "../../agents/internal-events.js";
 import type { SpawnedRunMetadata } from "../../agents/spawned-context.js";
 import type { PromptMode } from "../../agents/system-prompt.types.js";
 import type { SourceReplyDeliveryMode } from "../../auto-reply/get-reply-options.types.js";
+import type { ReasoningLevel } from "../../auto-reply/thinking.js";
 import type { ChannelOutboundTargetMode } from "../../channels/plugins/types.public.js";
 import type { PromptImageOrderEntry } from "../../media/prompt-image-order.js";
 import type { InputProvenance } from "../../sessions/input-provenance.js";
@@ -60,6 +61,8 @@ export type AgentCommandOpts = {
   thinking?: string;
   thinkingOnce?: string;
   verbose?: string;
+  /** Optional reasoning stream level for this run. */
+  reasoningLevel?: ReasoningLevel;
   json?: boolean;
   timeout?: string;
   deliver?: boolean;
@@ -99,6 +102,8 @@ export type AgentCommandOpts = {
   abortSignal?: AbortSignal;
   lane?: string;
   runId?: string;
+  /** Optional provider-specific metadata persisted to transcript by integrations. */
+  providerMetadata?: Record<string, unknown>;
   extraSystemPrompt?: string;
   /** Bootstrap workspace context injection mode for this run. */
   bootstrapContextMode?: "full" | "lightweight";
@@ -110,6 +115,10 @@ export type AgentCommandOpts = {
   sourceReplyDeliveryMode?: SourceReplyDeliveryMode;
   /** Per-call stream param overrides (best-effort). */
   streamParams?: AgentStreamParams;
+  /** Optional max decoded bytes to include for base64 data in tool results. */
+  toolResultMaxDataBytes?: number;
+  /** Optional reasoning stream callback for hosted integrations. */
+  onReasoningStream?: (payload: { text?: string; mediaUrls?: string[] }) => void | Promise<void>;
   /** Explicit workspace directory override (for subagents to inherit parent workspace). */
   workspaceDir?: SpawnedRunMetadata["workspaceDir"];
   /** Force bundled MCP teardown when a one-shot local run completes. */

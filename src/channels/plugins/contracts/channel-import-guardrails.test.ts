@@ -286,6 +286,35 @@ function readSource(path: string): string {
   return text;
 }
 
+function findPluginSdkToExtensionApiBackedges(): Array<{
+  apiPath: string;
+  extensionId: string;
+  sdkPath: string;
+}> {
+  const pluginSdkDir = resolve(ROOT_DIR, "plugin-sdk");
+  const results: Array<{
+    apiPath: string;
+    extensionId: string;
+    sdkPath: string;
+  }> = [];
+  for (const entry of fs.readdirSync(pluginSdkDir, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith(".ts")) {
+      continue;
+    }
+    const sdkPath = `src/plugin-sdk/${entry.name}`;
+    const match = readSource(sdkPath).match(/extensions\/([^/"']+)\/api\.js/u);
+    if (!match?.[1]) {
+      continue;
+    }
+    results.push({
+      apiPath: `extensions/${match[1]}/api.ts`,
+      extensionId: match[1],
+      sdkPath,
+    });
+  }
+  return results;
+}
+
 function normalizePath(path: string): string {
   return toRepoPath(path);
 }
@@ -682,6 +711,16 @@ describe("channel import guardrails", () => {
         file,
         getSourceAnalysis(file).importSpecifiers,
       );
+    }
+  });
+
+  it("prevents plugin-sdk subpaths from forming two-way api barrel cycles", () => {
+    for (const edge of findPluginSdkToExtensionApiBackedges()) {
+      const apiSource = readSource(edge.apiPath);
+      expect(
+        apiSource,
+        `${edge.apiPath} should not import ${edge.sdkPath} through its own plugin-sdk facade`,
+      ).not.toMatch(new RegExp(`["']openclaw/plugin-sdk/${edge.extensionId}["']`, "u"));
     }
   });
 

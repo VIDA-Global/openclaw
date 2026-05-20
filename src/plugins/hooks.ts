@@ -85,6 +85,10 @@ import type {
   PluginHookBeforeInstallEvent,
   PluginHookBeforeInstallResult,
 } from "./hook-types.js";
+import {
+  resolvePluginRuntimeRequestAttributionScope,
+  withPluginRuntimeRequestAttributionScope,
+} from "./runtime/request-attribution-scope.js";
 
 // Re-export types for consumers
 export type {
@@ -479,6 +483,9 @@ export function createHookRunner(
     return firstLine || "unknown error";
   };
 
+  const withRequestAttributionScope = <T>(ctx: unknown, run: () => T): T =>
+    withPluginRuntimeRequestAttributionScope(resolvePluginRuntimeRequestAttributionScope(ctx), run);
+
   const isPromiseLike = (value: unknown): value is PromiseLike<unknown> => {
     if ((typeof value !== "object" && typeof value !== "function") || value === null) {
       return false;
@@ -566,7 +573,9 @@ export function createHookRunner(
     const promises = hooks.map(async (hook) => {
       try {
         const promise = Promise.resolve(
-          (hook.handler as (event: unknown, ctx: unknown) => Promise<void> | void)(event, ctx),
+          withRequestAttributionScope(ctx, () =>
+            (hook.handler as (event: unknown, ctx: unknown) => Promise<void> | void)(event, ctx),
+          ),
         );
         const timeoutMs = getVoidHookTimeoutMs(hookName, hook);
         if (timeoutMs) {
@@ -604,7 +613,9 @@ export function createHookRunner(
     for (const hook of hooks) {
       try {
         const handler = hook.handler as (event: unknown, ctx: unknown) => Promise<TResult>;
-        const promise = Promise.resolve(handler(event, ctx));
+        const promise = Promise.resolve(
+          withRequestAttributionScope(ctx, () => handler(event, ctx)),
+        );
         const timeoutMs = getModifyingHookTimeoutMs(hookName, hook);
         const handlerResult = timeoutMs ? await withHookTimeout(promise, timeoutMs) : await promise;
 
@@ -685,7 +696,9 @@ export function createHookRunner(
     for (const hook of hooks) {
       try {
         const promise = Promise.resolve(
-          (hook.handler as (event: unknown, ctx: unknown) => Promise<TResult | void>)(event, ctx),
+          withRequestAttributionScope(ctx, () =>
+            (hook.handler as (event: unknown, ctx: unknown) => Promise<TResult | void>)(event, ctx),
+          ),
         );
         const timeoutMs = getClaimingHookTimeoutMs(hookName, hook);
         const handlerResult = timeoutMs ? await withHookTimeout(promise, timeoutMs) : await promise;
@@ -736,7 +749,9 @@ export function createHookRunner(
     for (const hook of hooks) {
       try {
         const promise = Promise.resolve(
-          (hook.handler as (event: unknown, ctx: unknown) => Promise<TResult | void>)(event, ctx),
+          withRequestAttributionScope(ctx, () =>
+            (hook.handler as (event: unknown, ctx: unknown) => Promise<TResult | void>)(event, ctx),
+          ),
         );
         const timeoutMs = getClaimingHookTimeoutMs(hookName, hook);
         const handlerResult = timeoutMs ? await withHookTimeout(promise, timeoutMs) : await promise;
@@ -1213,7 +1228,9 @@ export function createHookRunner(
 
     for (const hook of hooks) {
       try {
-        const out = runSyncHookHandler(hook, { ...event, message: current }, ctx);
+        const out = withRequestAttributionScope(ctx, () =>
+          runSyncHookHandler(hook, { ...event, message: current }, ctx),
+        );
 
         // Guard against accidental async handlers (this hook is sync-only).
         if (isPromiseLike(out)) {
@@ -1273,7 +1290,9 @@ export function createHookRunner(
 
     for (const hook of hooks) {
       try {
-        const out = runSyncHookHandler(hook, { ...event, message: current }, ctx);
+        const out = withRequestAttributionScope(ctx, () =>
+          runSyncHookHandler(hook, { ...event, message: current }, ctx),
+        );
 
         // Guard against accidental async handlers (this hook is sync-only).
         if (isPromiseLike(out)) {

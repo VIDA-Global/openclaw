@@ -25,7 +25,22 @@ import { qaChannelStatus } from "./status.js";
 import type { CoreConfig, ResolvedQaChannelAccount } from "./types.js";
 
 const CHANNEL_ID = "qa-channel" as const;
-const meta = { ...getChatChannelMeta(CHANNEL_ID) };
+const QA_CHANNEL_META = {
+  id: CHANNEL_ID,
+  label: "QA Channel",
+  selectionLabel: "QA Channel (Synthetic)",
+  docsPath: "/channels/qa-channel",
+  docsLabel: "qa-channel",
+  blurb: "Synthetic Slack-class transport for automated OpenClaw QA scenarios.",
+  detailLabel: "QA Channel",
+  systemImage: "checklist",
+  exposure: {
+    configured: false,
+    setup: false,
+    docs: false,
+  },
+};
+const meta = { ...QA_CHANNEL_META, ...getChatChannelMeta(CHANNEL_ID), id: CHANNEL_ID };
 
 const qaChannelMessageAdapter = defineChannelMessageAdapter({
   id: CHANNEL_ID,

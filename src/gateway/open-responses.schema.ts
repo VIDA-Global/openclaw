@@ -125,6 +125,7 @@ export const FunctionCallItemSchema = z
 export const FunctionCallOutputItemSchema = z
   .object({
     type: z.literal("function_call_output"),
+    id: z.string().optional(),
     call_id: z.string(),
     output: z.string(),
   })
@@ -206,6 +207,7 @@ export const CreateResponseBodySchema = z
     temperature: z.number().min(0).max(2).optional(),
     top_p: z.number().min(0).max(1).optional(),
     metadata: z.record(z.string(), z.string()).optional(),
+    provider_metadata: z.record(z.string(), z.unknown()).optional(),
     store: z.boolean().optional(),
     previous_response_id: z.string().optional(),
     reasoning: z
@@ -252,6 +254,15 @@ export const OutputItemSchema = z.discriminatedUnion("type", [
       call_id: z.string(),
       name: z.string(),
       arguments: z.string(),
+      status: z.enum(["in_progress", "completed"]).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("function_call_output"),
+      id: z.string().optional(),
+      call_id: z.string(),
+      output: z.string(),
       status: z.enum(["in_progress", "completed"]).optional(),
     })
     .strict(),
