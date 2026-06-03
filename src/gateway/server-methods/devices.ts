@@ -257,6 +257,9 @@ export const deviceHandlers: GatewayRequestHandlers = {
     }
     const approved = await approveDevicePairing(requestId, { callerScopes: authz.callerScopes });
     if (!approved) {
+      context.logGateway.warn(
+        `device pairing approval unknown requestId request=${requestId} callerDevice=${authz.callerDeviceId ?? "none"} callerIsAdmin=${authz.isAdminCaller} callerScopes=${authz.callerScopes.join(",") || "none"}`,
+      );
       respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "unknown requestId"));
       return;
     }
