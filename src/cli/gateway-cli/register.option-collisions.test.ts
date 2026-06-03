@@ -48,6 +48,7 @@ vi.mock("./call.js", () => ({
       .option("--url <url>", "Gateway WebSocket URL")
       .option("--token <token>", "Gateway token")
       .option("--password <password>", "Gateway password")
+      .option("--scopes <json>", "JSON array of Gateway scopes to request")
       .option("--timeout <ms>", "Timeout in ms", "10000")
       .option("--expect-final", "Wait for final response (agent)", false)
       .option("--json", "Output JSON", false),
@@ -157,6 +158,27 @@ describe("gateway register option collisions", () => {
         const [method, opts, params] = firstGatewayCall();
         expect(method).toBe("health");
         expect((opts as { token?: string } | undefined)?.token).toBe("tok_call");
+        expect(params).toEqual({});
+      },
+    },
+    {
+      name: "forwards --scopes to gateway call when parent and child option names collide",
+      argv: [
+        "gateway",
+        "call",
+        "health",
+        "--scopes",
+        '["operator.read","operator.write"]',
+        "--json",
+      ],
+      assert: () => {
+        expect(callGatewayCli).toHaveBeenCalledTimes(1);
+        const [method, opts, params] = firstGatewayCall();
+        expect(method).toBe("health");
+        expect((opts as { scopes?: string[] } | undefined)?.scopes).toEqual([
+          "operator.read",
+          "operator.write",
+        ]);
         expect(params).toEqual({});
       },
     },

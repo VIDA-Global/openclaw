@@ -91,6 +91,7 @@ function gatewayCallOpts(cmd: Command): Command {
     .option("--url <url>", "Gateway WebSocket URL (defaults to gateway.remote.url when configured)")
     .option("--token <token>", "Gateway token (if required)")
     .option("--password <password>", "Gateway password (password auth)")
+    .option("--scopes <json>", "JSON array of Gateway scopes to request")
     .option("--timeout <ms>", "Timeout in ms", "10000")
     .option("--expect-final", "Wait for final response (agent)", false)
     .option("--json", "Output JSON", false);
@@ -137,16 +138,37 @@ function parseDaysOption(raw: unknown, fallback = 30): number {
   return fallback;
 }
 
-function resolveGatewayRpcOptions<T extends { token?: string; password?: string }>(
-  opts: T,
-  command?: Command,
-): T {
+function parseScopesOption(raw: unknown): string[] | undefined {
+  if (raw === undefined || raw === null || raw === "") {
+    return undefined;
+  }
+  if (Array.isArray(raw)) {
+    return raw.map((entry) => String(entry || "").trim()).filter(Boolean);
+  }
+  if (typeof raw === "string") {
+    const text = raw.trim();
+    if (!text) {
+      return undefined;
+    }
+    const parsed = JSON.parse(text);
+    if (!Array.isArray(parsed)) {
+      throw new Error("Invalid --scopes JSON: expected an array");
+    }
+    return parsed.map((entry) => String(entry || "").trim()).filter(Boolean);
+  }
+  return undefined;
+}
+
+function resolveGatewayRpcOptions<
+  T extends { token?: string; password?: string; scopes?: unknown },
+>(opts: T, command?: Command): T {
   const parentToken = inheritOptionFromParent<string>(command, "token");
   const parentPassword = inheritOptionFromParent<string>(command, "password");
   return {
     ...opts,
     token: opts.token ?? parentToken,
     password: opts.password ?? parentPassword,
+    scopes: parseScopesOption(opts.scopes),
   };
 }
 
