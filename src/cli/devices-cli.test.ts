@@ -243,6 +243,21 @@ describe("devices cli approve", () => {
     expect(runtime.exit).not.toHaveBeenCalledWith(1);
   });
 
+  it("treats stale unknown request ids as already resolved when other requests remain", async () => {
+    callGateway
+      .mockResolvedValueOnce({ pending: [], paired: [] })
+      .mockRejectedValueOnce(new Error("GatewayClientRequestError: unknown requestId"))
+      .mockResolvedValueOnce({ pending: [{ requestId: "req-other" }], paired: [] });
+
+    await runDevicesApprove(["req-stale-mixed"]);
+
+    expect(callGateway).toHaveBeenCalledTimes(3);
+    expectGatewayCall(2, { method: "device.pair.list" });
+    const logOutput = runtime.log.mock.calls.map((c) => readRuntimeCallText(c)).join("\n");
+    expect(logOutput).toContain("Already resolved");
+    expect(runtime.exit).not.toHaveBeenCalledWith(1);
+  });
+
   it("retries explicit approval with admin scope when gateway reports missing operator.admin", async () => {
     callGateway
       .mockResolvedValueOnce({ pending: [], paired: [] })
@@ -260,6 +275,49 @@ describe("devices cli approve", () => {
     expectGatewayCall(2, {
       method: "device.pair.approve",
       params: { requestId: "req-admin" },
+      scopes: ["operator.admin"],
+    });
+  });
+
+  it("retries explicit approval with the required operator scope when gateway reports missing scope", async () => {
+    callGateway
+      .mockResolvedValueOnce({ pending: [], paired: [] })
+      .mockRejectedValueOnce(new Error("GatewayClientRequestError: missing scope: operator.read"))
+      .mockResolvedValueOnce({ device: { deviceId: "device-read" } });
+
+    await runDevicesApprove(["req-read"]);
+
+    expect(callGateway).toHaveBeenCalledTimes(3);
+    expectGatewayCall(1, {
+      method: "device.pair.approve",
+      params: { requestId: "req-read" },
+      scopes: undefined,
+    });
+    expectGatewayCall(2, {
+      method: "device.pair.approve",
+      params: { requestId: "req-read" },
+      scopes: ["operator.read"],
+    });
+  });
+
+  it("escalates to admin scope when required after an intermediate missing scope retry", async () => {
+    callGateway
+      .mockResolvedValueOnce({ pending: [], paired: [] })
+      .mockRejectedValueOnce(new Error("GatewayClientRequestError: missing scope: operator.read"))
+      .mockRejectedValueOnce(new Error("GatewayClientRequestError: missing scope: operator.admin"))
+      .mockResolvedValueOnce({ device: { deviceId: "device-admin-escalated" } });
+
+    await runDevicesApprove(["req-escalate"]);
+
+    expect(callGateway).toHaveBeenCalledTimes(4);
+    expectGatewayCall(2, {
+      method: "device.pair.approve",
+      params: { requestId: "req-escalate" },
+      scopes: ["operator.read"],
+    });
+    expectGatewayCall(3, {
+      method: "device.pair.approve",
+      params: { requestId: "req-escalate" },
       scopes: ["operator.admin"],
     });
   });

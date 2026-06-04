@@ -151,6 +151,26 @@ function isMissingAdminScopeError(error: unknown): boolean {
   );
 }
 
+function parseMissingScope(error: unknown): OperatorScope | undefined {
+  const message = normalizeLowercaseStringOrEmpty(normalizeErrorMessage(error));
+  const match = message.match(/missing scope:\s*([a-z0-9._-]+)/i);
+  const scope = normalizeOptionalString(match?.[1]);
+  if (!scope) {
+    return undefined;
+  }
+  if (scope === ADMIN_SCOPE || isKnownNonAdminOperatorScope(scope)) {
+    return scope;
+  }
+  return undefined;
+}
+
+function mergeGatewayScopes(
+  base: OperatorScope[] | undefined,
+  required: OperatorScope,
+): OperatorScope[] {
+  return [...new Set([...(base ?? []), required])];
+}
+
 function resolveLocalPairingFallback(
   opts: DevicesRpcOpts,
   error: unknown,
@@ -238,46 +258,47 @@ async function approvePairingWithFallback(
   requestId: string,
 ): Promise<Record<string, unknown>> {
   const scopes = await resolveApprovePairingGatewayScopes(opts, requestId);
-  try {
-    return await callGatewayCli(
+  const callApprove = async (gatewayScopes: OperatorScope[] | undefined) =>
+    await callGatewayCli(
       "device.pair.approve",
       opts,
       { requestId },
-      scopes ? { scopes } : undefined,
+      gatewayScopes ? { scopes: gatewayScopes } : undefined,
     );
+  try {
+    return await callApprove(scopes);
   } catch (error) {
+    let approveError: unknown = error;
     if (isUnknownRequestIdError(error)) {
       const refreshed = await listPairingWithFallback(opts);
       const pending = Array.isArray(refreshed.pending) ? refreshed.pending : [];
       const hasExactRequest = pending.some(
         (req) => normalizeOptionalString(req.requestId) === requestId,
       );
-      if (!hasExactRequest && pending.length === 0) {
+      if (!hasExactRequest) {
         return {
           requestId,
           status: "already-resolved",
         };
       }
     }
-    if (isMissingAdminScopeError(error) && !scopes?.includes(ADMIN_SCOPE)) {
-      return await callGatewayCli(
-        "device.pair.approve",
-        opts,
-        { requestId },
-        { scopes: [ADMIN_SCOPE] },
-      );
+    const requiredScope = parseMissingScope(error);
+    if (requiredScope && !scopes?.includes(requiredScope)) {
+      try {
+        return await callApprove(mergeGatewayScopes(scopes, requiredScope));
+      } catch (retryError) {
+        approveError = retryError;
+      }
     }
-    if (isDevicePairingApprovalDenied(error) && !scopes?.includes(ADMIN_SCOPE)) {
-      return await callGatewayCli(
-        "device.pair.approve",
-        opts,
-        { requestId },
-        { scopes: [ADMIN_SCOPE] },
-      );
+    if (
+      (isMissingAdminScopeError(approveError) || isDevicePairingApprovalDenied(approveError)) &&
+      !scopes?.includes(ADMIN_SCOPE)
+    ) {
+      return await callApprove([ADMIN_SCOPE]);
     }
-    const fallback = resolveLocalPairingFallback(opts, error);
+    const fallback = resolveLocalPairingFallback(opts, approveError);
     if (!fallback) {
-      throw error;
+      throw approveError;
     }
     const gatewayRequestId = normalizeOptionalString(fallback.details.requestId);
     if (gatewayRequestId && gatewayRequestId !== requestId) {
@@ -298,7 +319,7 @@ async function approvePairingWithFallback(
       };
     }
     if (approved.status === "forbidden") {
-      throw new Error(formatDevicePairingForbiddenMessage(approved), { cause: error });
+      throw new Error(formatDevicePairingForbiddenMessage(approved), { cause: approveError });
     }
     if (opts.json !== true) {
       defaultRuntime.log(theme.warn(FALLBACK_NOTICE));
