@@ -226,6 +226,44 @@ describe("devices cli approve", () => {
     });
   });
 
+  it("treats stale unknown request ids as already resolved after refresh", async () => {
+    callGateway
+      .mockResolvedValueOnce({ pending: [], paired: [] })
+      .mockRejectedValueOnce(new Error("GatewayClientRequestError: unknown requestId"))
+      .mockResolvedValueOnce({ pending: [], paired: [] });
+
+    await runDevicesApprove(["req-stale"]);
+
+    expect(callGateway).toHaveBeenCalledTimes(3);
+    expectGatewayCall(0, { method: "device.pair.list" });
+    expectGatewayCall(1, { method: "device.pair.approve", params: { requestId: "req-stale" } });
+    expectGatewayCall(2, { method: "device.pair.list" });
+    const logOutput = runtime.log.mock.calls.map((c) => readRuntimeCallText(c)).join("\n");
+    expect(logOutput).toContain("Already resolved");
+    expect(runtime.exit).not.toHaveBeenCalledWith(1);
+  });
+
+  it("retries explicit approval with admin scope when gateway reports missing operator.admin", async () => {
+    callGateway
+      .mockResolvedValueOnce({ pending: [], paired: [] })
+      .mockRejectedValueOnce(new Error("GatewayClientRequestError: missing scope: operator.admin"))
+      .mockResolvedValueOnce({ device: { deviceId: "device-admin" } });
+
+    await runDevicesApprove(["req-admin"]);
+
+    expect(callGateway).toHaveBeenCalledTimes(3);
+    expectGatewayCall(1, {
+      method: "device.pair.approve",
+      params: { requestId: "req-admin" },
+      scopes: undefined,
+    });
+    expectGatewayCall(2, {
+      method: "device.pair.approve",
+      params: { requestId: "req-admin" },
+      scopes: ["operator.admin"],
+    });
+  });
+
   it("uses admin scope when a repair approval would inherit an admin token", async () => {
     callGateway
       .mockResolvedValueOnce({

@@ -284,10 +284,25 @@ enum PairingAlertSupport {
             logger.info("approved \(kind, privacy: .public) pairing requestId=\(requestId, privacy: .public)")
             return true
         } catch {
+            if self.isStalePairingApprovalError(error) {
+                logger.info(
+                    "approval already resolved \(kind, privacy: .public) pairing requestId=\(requestId, privacy: .public)")
+                return true
+            }
             logger.error("approve failed requestId=\(requestId, privacy: .public)")
             logger.error("approve failed: \(error.localizedDescription, privacy: .public)")
             return false
         }
+    }
+
+    private static func isStalePairingApprovalError(_ error: Error) -> Bool {
+        guard let responseError = error as? GatewayResponseError else {
+            return false
+        }
+        guard responseError.code == "INVALID_REQUEST" else {
+            return false
+        }
+        return responseError.message.lowercased().contains("unknown requestid")
     }
 
     static func rejectRequest(

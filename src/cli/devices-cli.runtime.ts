@@ -139,6 +139,18 @@ function isDevicePairingApprovalDenied(error: unknown): boolean {
   );
 }
 
+function isUnknownRequestIdError(error: unknown): boolean {
+  return normalizeLowercaseStringOrEmpty(normalizeErrorMessage(error)).includes(
+    "unknown requestid",
+  );
+}
+
+function isMissingAdminScopeError(error: unknown): boolean {
+  return normalizeLowercaseStringOrEmpty(normalizeErrorMessage(error)).includes(
+    "missing scope: operator.admin",
+  );
+}
+
 function resolveLocalPairingFallback(
   opts: DevicesRpcOpts,
   error: unknown,
@@ -224,7 +236,7 @@ async function listPairingWithFallback(opts: DevicesRpcOpts): Promise<DevicePair
 async function approvePairingWithFallback(
   opts: DevicesRpcOpts,
   requestId: string,
-): Promise<Record<string, unknown> | null> {
+): Promise<Record<string, unknown>> {
   const scopes = await resolveApprovePairingGatewayScopes(opts, requestId);
   try {
     return await callGatewayCli(
@@ -234,6 +246,27 @@ async function approvePairingWithFallback(
       scopes ? { scopes } : undefined,
     );
   } catch (error) {
+    if (isUnknownRequestIdError(error)) {
+      const refreshed = await listPairingWithFallback(opts);
+      const pending = Array.isArray(refreshed.pending) ? refreshed.pending : [];
+      const hasExactRequest = pending.some(
+        (req) => normalizeOptionalString(req.requestId) === requestId,
+      );
+      if (!hasExactRequest && pending.length === 0) {
+        return {
+          requestId,
+          status: "already-resolved",
+        };
+      }
+    }
+    if (isMissingAdminScopeError(error) && !scopes?.includes(ADMIN_SCOPE)) {
+      return await callGatewayCli(
+        "device.pair.approve",
+        opts,
+        { requestId },
+        { scopes: [ADMIN_SCOPE] },
+      );
+    }
     if (isDevicePairingApprovalDenied(error) && !scopes?.includes(ADMIN_SCOPE)) {
       return await callGatewayCli(
         "device.pair.approve",
@@ -259,7 +292,10 @@ async function approvePairingWithFallback(
       if (gatewayRequestId && gatewayRequestId === requestId) {
         throw buildFallbackStateMismatchError(fallback.details);
       }
-      return null;
+      return {
+        requestId,
+        status: "already-resolved",
+      };
     }
     if (approved.status === "forbidden") {
       throw new Error(formatDevicePairingForbiddenMessage(approved), { cause: error });
@@ -744,9 +780,14 @@ export async function runDevicesApproveCommand(
     return;
   }
   const result = await approvePairingWithFallback(opts, resolvedRequestId);
-  if (!result) {
-    defaultRuntime.error("unknown requestId");
-    defaultRuntime.exit(1);
+  if ((result as { status?: unknown }).status === "already-resolved") {
+    if (opts.json) {
+      defaultRuntime.writeJson(result);
+      return;
+    }
+    defaultRuntime.log(
+      `${theme.muted("Already resolved")} ${theme.muted(`(${resolvedRequestId})`)}`,
+    );
     return;
   }
   if (opts.json) {
