@@ -39,6 +39,8 @@ export type SubscribeEmbeddedAgentSessionParams = {
   reasoningMode?: ReasoningLevel;
   thinkingLevel?: ThinkLevel;
   toolResultFormat?: ToolResultFormat;
+  /** Optional byte cap for preserving base64 tool-result data in hosted response output. */
+  toolResultMaxDataBytes?: number;
   toolProgressDetail?: ToolProgressDetailMode;
   shouldEmitToolResult?: () => boolean;
   shouldEmitToolOutput?: () => boolean;

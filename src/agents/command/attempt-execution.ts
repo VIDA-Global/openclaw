@@ -782,6 +782,8 @@ export function runAgentAttempt(params: {
     images: params.isFallbackRetry ? undefined : params.opts.images,
     imageOrder: params.isFallbackRetry ? undefined : params.opts.imageOrder,
     clientTools: params.opts.clientTools,
+    providerMetadata: params.opts.providerMetadata,
+    toolResultMaxDataBytes: params.opts.toolResultMaxDataBytes,
     provider: embeddedAgentProvider,
     model: params.modelOverride,
     modelFallbacksOverride: params.modelFallbacksOverride,
@@ -793,6 +795,7 @@ export function runAgentAttempt(params: {
     fastModeAutoOnSeconds: params.fastModeAutoOnSeconds,
     isFinalFallbackAttempt: params.isFinalFallbackAttempt,
     verboseLevel: params.resolvedVerboseLevel,
+    reasoningLevel: params.opts.reasoningLevel,
     bashElevated: params.opts.bashElevated,
     timeoutMs: params.timeoutMs,
     runId: params.runId,
@@ -816,6 +819,7 @@ export function runAgentAttempt(params: {
     promptMode: params.opts.promptMode,
     disableTools: params.opts.modelRun === true,
     onAgentEvent: params.onAgentEvent,
+    onAgentToolResult: params.opts.onAgentToolResult,
     deferTerminalLifecycle: params.deferTerminalLifecycle,
     deferTerminalLifecycleEnd: params.deferTerminalLifecycleEnd,
     suppressNextUserMessagePersistence: params.suppressPromptPersistenceOnRetry === true,
@@ -826,6 +830,7 @@ export function runAgentAttempt(params: {
       }
     },
     onSessionIdChanged: params.opts.onSessionIdChanged,
+    onReasoningStream: params.opts.onReasoningStream,
     bootstrapPromptWarningSignaturesSeen,
     bootstrapPromptWarningSignature,
   });

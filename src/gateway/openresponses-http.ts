@@ -73,7 +73,12 @@ import {
 } from "./openai-tool-choice.js";
 import { wrapUntrustedFileContent } from "./openresponses-file-content.js";
 import { buildAgentPrompt } from "./openresponses-prompt.js";
-import { createAssistantOutputItem, createFunctionCallOutputItem } from "./openresponses-shape.js";
+import {
+  createAssistantOutputItem,
+  createFunctionCallOutputItem,
+  createFunctionCallResultOutputItem,
+  createReasoningOutputItem,
+} from "./openresponses-shape.js";
 
 type OpenResponsesHttpOptions = {
   auth: ResolvedGatewayAuth;
@@ -377,6 +382,33 @@ function extractUsageFromResult(result: unknown): Usage {
 
 type PendingToolCall = { id: string; name: string; arguments: string };
 
+function safeHostedOutputString(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value === undefined) {
+    return "";
+  }
+  try {
+    const text = JSON.stringify(value);
+    return typeof text === "string" ? text : String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function resolveHostedProviderMetadata(
+  payload: CreateResponseBody,
+): Record<string, unknown> | undefined {
+  if (payload.provider_metadata && Object.keys(payload.provider_metadata).length > 0) {
+    return payload.provider_metadata;
+  }
+  if (payload.metadata?.["vida.ignoreOnProviderRelay"] === "true") {
+    return { vida: { ignoreOnProviderRelay: true } };
+  }
+  return undefined;
+}
+
 function resolveStopReasonAndPendingToolCalls(meta: unknown): {
   stopReason: string | undefined;
   pendingToolCalls: PendingToolCall[] | undefined;
@@ -415,6 +447,20 @@ async function runResponsesAgentCommand(params: {
   extraSystemPrompt: string;
   modelOverride?: string;
   streamParams: { maxTokens?: number; temperature?: number; topP?: number } | undefined;
+  providerMetadata?: Record<string, unknown>;
+  toolResultMaxDataBytes?: number;
+  reasoningLevel?: "stream";
+  onReasoningStream?: (payload: {
+    text?: string;
+    mediaUrls?: string[];
+    isReasoningSnapshot?: boolean;
+  }) => void | Promise<void>;
+  onAgentToolResult?: (event: { toolName: string; result: unknown; isError: boolean }) => void;
+  onAgentEvent?: (evt: {
+    stream: string;
+    data?: Record<string, unknown>;
+    sessionKey?: string;
+  }) => void;
   sessionKey: string;
   runId: string;
   messageChannel: string;
@@ -429,6 +475,12 @@ async function runResponsesAgentCommand(params: {
       extraSystemPrompt: params.extraSystemPrompt || undefined,
       model: params.modelOverride,
       streamParams: params.streamParams ?? undefined,
+      providerMetadata: params.providerMetadata,
+      toolResultMaxDataBytes: params.toolResultMaxDataBytes,
+      reasoningLevel: params.reasoningLevel,
+      onReasoningStream: params.onReasoningStream,
+      onAgentToolResult: params.onAgentToolResult,
+      onAgentEvent: params.onAgentEvent,
       sessionKey: params.sessionKey,
       runId: params.runId,
       deliver: false,
@@ -735,10 +787,38 @@ export async function handleOpenResponsesHttpRequest(
           ...(streamTopP !== undefined ? { topP: streamTopP } : {}),
         }
       : undefined;
+  const providerMetadata = resolveHostedProviderMetadata(payload);
+  const toolResultMaxDataBytes =
+    typeof opts.config?.toolResultMaxDataBytes === "number"
+      ? opts.config.toolResultMaxDataBytes
+      : undefined;
+  const reasoningLevel = payload.reasoning ? ("stream" as const) : undefined;
+  const reasoningSummary = payload.reasoning?.summary;
 
   if (!stream) {
     const stopWatchingDisconnect = watchClientDisconnect(req, res, abortController);
     try {
+      const additionalOutputItems: OutputItem[] = [];
+      const toolCallItemsByCallId = new Set<string>();
+      const appendToolStart = (data: Record<string, unknown> | undefined) => {
+        const toolCallId = typeof data?.toolCallId === "string" ? data.toolCallId : undefined;
+        const name = typeof data?.name === "string" ? data.name : undefined;
+        if (!toolCallId || !name || toolCallItemsByCallId.has(toolCallId)) {
+          return;
+        }
+        toolCallItemsByCallId.add(toolCallId);
+        additionalOutputItems.push(
+          createFunctionCallOutputItem({
+            id: `call_${toolCallId}`,
+            callId: toolCallId,
+            name,
+            arguments: safeHostedOutputString(data?.args ?? {}),
+            status: "completed",
+          }),
+        );
+      };
+      let reasoningText = "";
+      const reasoningItemId = `rs_${responseId}`;
       const result = await runResponsesAgentCommand({
         message: prompt.message,
         images,
@@ -746,6 +826,37 @@ export async function handleOpenResponsesHttpRequest(
         extraSystemPrompt,
         modelOverride,
         streamParams,
+        providerMetadata,
+        toolResultMaxDataBytes,
+        reasoningLevel,
+        onReasoningStream: (reasoningPayload) => {
+          if (typeof reasoningPayload.text === "string" && reasoningPayload.text) {
+            reasoningText += reasoningPayload.text;
+          }
+        },
+        onAgentEvent: (event) => {
+          if (event.stream !== "tool") {
+            return;
+          }
+          if (event.data?.phase === "start") {
+            appendToolStart(event.data);
+          }
+          if (event.data?.phase === "result") {
+            const toolCallId =
+              typeof event.data.toolCallId === "string" ? event.data.toolCallId : undefined;
+            if (!toolCallId) {
+              return;
+            }
+            additionalOutputItems.push(
+              createFunctionCallResultOutputItem({
+                id: `fco_${toolCallId}`,
+                callId: toolCallId,
+                output: safeHostedOutputString(event.data.result),
+                status: "completed",
+              }),
+            );
+          }
+        },
         sessionKey,
         runId: responseId,
         messageChannel,
@@ -761,6 +872,15 @@ export async function handleOpenResponsesHttpRequest(
       const usage = extractUsageFromResult(result);
       const meta = (result as { meta?: unknown } | null)?.meta;
       const { stopReason, pendingToolCalls } = resolveStopReasonAndPendingToolCalls(meta);
+      if (reasoningText) {
+        additionalOutputItems.unshift(
+          createReasoningOutputItem({
+            id: reasoningItemId,
+            content: reasoningText,
+            ...(reasoningSummary ? { summary: reasoningSummary } : {}),
+          }),
+        );
+      }
 
       // A `required`/pinned `tool_choice` must reject a text-only turn instead
       // of returning ordinary assistant prose, mirroring /v1/chat/completions.
@@ -825,7 +945,7 @@ export async function handleOpenResponsesHttpRequest(
           id: responseId,
           model,
           status: "incomplete",
-          output,
+          output: [...additionalOutputItems, ...output],
           usage,
         });
         rememberResponseSession();
@@ -846,6 +966,7 @@ export async function handleOpenResponsesHttpRequest(
         model,
         status: "completed",
         output: [
+          ...additionalOutputItems,
           createAssistantOutputItem({
             id: outputItemId,
             text: content,
@@ -918,6 +1039,121 @@ export async function handleOpenResponsesHttpRequest(
   let stopWatchingDisconnect = () => {};
   let finalUsage: Usage | undefined;
   let finalizeRequested: { status: ResponseResource["status"]; text: string } | null = null;
+  const additionalOutputItems: OutputItem[] = [];
+  const streamedToolCallIds = new Set<string>();
+  let nextStreamOutputIndex = 1;
+  const reserveAdditionalOutputIndex = () => {
+    const outputIndex = nextStreamOutputIndex;
+    nextStreamOutputIndex += 1;
+    return outputIndex;
+  };
+  const reasoningItemId = `rs_${responseId}`;
+  let reasoningOutputIndex: number | undefined;
+  let reasoningText = "";
+  let reasoningDone = false;
+
+  const emitReasoningDelta = (delta: string) => {
+    if (closed || !delta) {
+      return;
+    }
+    if (reasoningOutputIndex === undefined) {
+      reasoningOutputIndex = reserveAdditionalOutputIndex();
+      writeSseEvent(res, {
+        type: "response.output_item.added",
+        output_index: reasoningOutputIndex,
+        item: createReasoningOutputItem({
+          id: reasoningItemId,
+          ...(reasoningSummary ? { summary: reasoningSummary } : {}),
+        }),
+      });
+    }
+    reasoningText += delta;
+    writeSseEvent(res, {
+      type: "response.reasoning.delta",
+      item_id: reasoningItemId,
+      output_index: reasoningOutputIndex,
+      delta,
+    });
+  };
+
+  const finishReasoningItem = () => {
+    if (reasoningDone || reasoningOutputIndex === undefined) {
+      return;
+    }
+    const item = createReasoningOutputItem({
+      id: reasoningItemId,
+      content: reasoningText,
+      ...(reasoningSummary ? { summary: reasoningSummary } : {}),
+    });
+    additionalOutputItems.push(item);
+    writeSseEvent(res, {
+      type: "response.output_item.done",
+      output_index: reasoningOutputIndex,
+      item,
+    });
+    reasoningDone = true;
+  };
+
+  const emitFunctionCallItem = (data: Record<string, unknown> | undefined) => {
+    const toolCallId = typeof data?.toolCallId === "string" ? data.toolCallId : undefined;
+    const name = typeof data?.name === "string" ? data.name : undefined;
+    if (!toolCallId || !name || streamedToolCallIds.has(toolCallId)) {
+      return;
+    }
+    streamedToolCallIds.add(toolCallId);
+    const outputIndex = reserveAdditionalOutputIndex();
+    const itemId = `call_${toolCallId}`;
+    const addedItem = createFunctionCallOutputItem({
+      id: itemId,
+      callId: toolCallId,
+      name,
+      arguments: safeHostedOutputString(data?.args ?? {}),
+      status: "in_progress",
+    });
+    writeSseEvent(res, {
+      type: "response.output_item.added",
+      output_index: outputIndex,
+      item: addedItem,
+    });
+    const completedItem = createFunctionCallOutputItem({
+      id: itemId,
+      callId: toolCallId,
+      name,
+      arguments: safeHostedOutputString(data?.args ?? {}),
+      status: "completed",
+    });
+    additionalOutputItems.push(completedItem);
+    writeSseEvent(res, {
+      type: "response.output_item.done",
+      output_index: outputIndex,
+      item: completedItem,
+    });
+  };
+
+  const emitFunctionCallResultItem = (data: Record<string, unknown> | undefined) => {
+    const toolCallId = typeof data?.toolCallId === "string" ? data.toolCallId : undefined;
+    if (!toolCallId) {
+      return;
+    }
+    const outputIndex = reserveAdditionalOutputIndex();
+    const item = createFunctionCallResultOutputItem({
+      id: `fco_${toolCallId}`,
+      callId: toolCallId,
+      output: safeHostedOutputString(data?.result),
+      status: "completed",
+    });
+    writeSseEvent(res, {
+      type: "response.output_item.added",
+      output_index: outputIndex,
+      item,
+    });
+    additionalOutputItems.push(item);
+    writeSseEvent(res, {
+      type: "response.output_item.done",
+      output_index: outputIndex,
+      item,
+    });
+  };
 
   const maybeFinalize = () => {
     if (closed) {
@@ -934,6 +1170,7 @@ export async function handleOpenResponsesHttpRequest(
     closed = true;
     stopWatchingDisconnect();
     unsubscribe();
+    finishReasoningItem();
 
     writeSseEvent(res, {
       type: "response.output_text.done",
@@ -968,7 +1205,7 @@ export async function handleOpenResponsesHttpRequest(
       id: responseId,
       model,
       status: finalizeRequested.status,
-      output: [completedItem],
+      output: [completedItem, ...additionalOutputItems],
       usage,
     });
 
@@ -1061,6 +1298,17 @@ export async function handleOpenResponsesHttpRequest(
       return;
     }
 
+    if (evt.stream === "tool") {
+      if (evt.data?.phase === "start") {
+        emitFunctionCallItem(evt.data);
+        return;
+      }
+      if (evt.data?.phase === "result") {
+        emitFunctionCallResultItem(evt.data);
+        return;
+      }
+    }
+
     if (evt.stream === "lifecycle") {
       const phase = evt.data?.phase;
       if (phase === "end" || phase === "error") {
@@ -1085,6 +1333,14 @@ export async function handleOpenResponsesHttpRequest(
         extraSystemPrompt,
         modelOverride,
         streamParams,
+        providerMetadata,
+        toolResultMaxDataBytes,
+        reasoningLevel,
+        onReasoningStream: (reasoningPayload) => {
+          if (typeof reasoningPayload.text === "string") {
+            emitReasoningDelta(reasoningPayload.text);
+          }
+        },
         sessionKey,
         runId: responseId,
         messageChannel,
@@ -1190,8 +1446,8 @@ export async function handleOpenResponsesHttpRequest(
         // with multiple client tool calls dropped every call past the
         // first.
         const functionCallItems: OutputItem[] = [];
-        let nextStreamOutputIndex = 1;
         for (const functionCall of pendingToolCalls) {
+          const functionCallOutputIndex = reserveAdditionalOutputIndex();
           const functionCallItemId = `call_${randomUUID()}`;
           const functionCallItem = createFunctionCallOutputItem({
             id: functionCallItemId,
@@ -1201,7 +1457,7 @@ export async function handleOpenResponsesHttpRequest(
           });
           writeSseEvent(res, {
             type: "response.output_item.added",
-            output_index: nextStreamOutputIndex,
+            output_index: functionCallOutputIndex,
             item: functionCallItem,
           });
           const completedFunctionCallItem = createFunctionCallOutputItem({
@@ -1213,18 +1469,18 @@ export async function handleOpenResponsesHttpRequest(
           });
           writeSseEvent(res, {
             type: "response.output_item.done",
-            output_index: nextStreamOutputIndex,
+            output_index: functionCallOutputIndex,
             item: completedFunctionCallItem,
           });
-          functionCallItems.push(functionCallItem);
-          nextStreamOutputIndex += 1;
+          functionCallItems.push(completedFunctionCallItem);
         }
+        finishReasoningItem();
 
         const incompleteResponse = createResponseResource({
           id: responseId,
           model,
           status: "incomplete",
-          output: [completedItem, ...functionCallItems],
+          output: [completedItem, ...additionalOutputItems, ...functionCallItems],
           usage,
         });
         closed = true;

@@ -292,6 +292,7 @@ type ToolHandlerParams = Pick<
   | "agentId"
   | "replaySafeToolNames"
   | "toolResultFormat"
+  | "toolResultMaxDataBytes"
   | "toolProgressDetail"
   | "sourceReplyDeliveryMode"
 >;

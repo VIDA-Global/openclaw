@@ -38,6 +38,7 @@ export function guardSessionManager(
     config?: OpenClawConfig;
     contextWindowTokens?: number;
     inputProvenance?: InputProvenance;
+    providerMetadata?: Record<string, unknown>;
     allowSyntheticToolResults?: boolean;
     missingToolResultText?: string;
     allowedToolNames?: Iterable<string>;
@@ -64,6 +65,23 @@ export function guardSessionManager(
 
   const hookRunner = getGlobalHookRunner();
   let pendingPreparedUserTurnMessage = opts?.preparedUserTurnMessage;
+  const applyProviderMetadata = (message: AgentMessage): AgentMessage => {
+    const providerMetadata = opts?.providerMetadata;
+    if (!providerMetadata || Object.keys(providerMetadata).length === 0) {
+      return message;
+    }
+    const record = message as AgentMessage & {
+      providerMetadata?: Record<string, unknown>;
+    };
+    const merged = {
+      ...(record as unknown as Record<string, unknown>),
+      providerMetadata: {
+        ...(record.providerMetadata ?? {}),
+        ...providerMetadata,
+      },
+    };
+    return merged as unknown as AgentMessage;
+  };
   const beforeMessageWrite = (event: { message: AgentMessage }) => {
     let message = event.message;
     let changed = false;
@@ -83,6 +101,11 @@ export function guardSessionManager(
     const redacted = redactTranscriptMessage(message, opts?.config);
     if (redacted !== message) {
       message = redacted;
+      changed = true;
+    }
+    const withProviderMetadata = applyProviderMetadata(message);
+    if (withProviderMetadata !== message) {
+      message = withProviderMetadata;
       changed = true;
     }
     return changed ? { message } : undefined;
@@ -124,7 +147,7 @@ export function guardSessionManager(
       if (merged !== withProvenance) {
         pendingPreparedUserTurnMessage = undefined;
       }
-      return merged;
+      return applyProviderMetadata(merged);
     },
     transformToolResultForPersistence: transform,
     allowSyntheticToolResults: opts?.allowSyntheticToolResults,
