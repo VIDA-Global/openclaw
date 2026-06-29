@@ -40,6 +40,7 @@ const useMultiFileAuthStateMock = vi.mocked(baileys.useMultiFileAuthState);
 
 let createWaSocket: typeof import("./session.js").createWaSocket;
 let formatError: typeof import("./session.js").formatError;
+let getStatusCode: typeof import("./session.js").getStatusCode;
 let logWebSelfId: typeof import("./session.js").logWebSelfId;
 let renderQrTerminalMock: ReturnType<typeof vi.fn>;
 let waitForWaConnection: typeof import("./session.js").waitForWaConnection;
@@ -154,6 +155,7 @@ function readLastSocketOptions(): {
   keepAliveIntervalMs?: number;
   printQRInTerminal?: boolean;
   logger?: { level?: string; trace?: unknown };
+  browser?: unknown;
 } {
   const [options] = firstMockCall(
     baileys.makeWASocket as ReturnType<typeof vi.fn>,
@@ -170,6 +172,7 @@ function readLastSocketOptions(): {
     keepAliveIntervalMs?: number;
     printQRInTerminal?: boolean;
     logger?: { level?: string; trace?: unknown };
+    browser?: unknown;
   };
 }
 
@@ -223,6 +226,7 @@ describe("web session", () => {
     ({
       createWaSocket,
       formatError,
+      getStatusCode,
       logWebSelfId,
       waitForWaConnection,
       waitForCredsSaveQueue,
@@ -260,6 +264,7 @@ describe("web session", () => {
     expect(passed.keepAliveIntervalMs).toBe(DEFAULT_WHATSAPP_SOCKET_TIMING.keepAliveIntervalMs);
     expect(passed.connectTimeoutMs).toBe(DEFAULT_WHATSAPP_SOCKET_TIMING.connectTimeoutMs);
     expect(passed.defaultQueryTimeoutMs).toBe(DEFAULT_WHATSAPP_SOCKET_TIMING.defaultQueryTimeoutMs);
+    expect(passed.browser).toEqual(["Vida Operator", "web", expect.any(String)]);
     const passedLogger = (passed as { logger?: { level?: string; trace?: unknown } }).logger;
     expect(passedLogger?.level).toBe("silent");
     if (typeof passedLogger?.trace !== "function") {
@@ -630,6 +635,29 @@ describe("web session", () => {
     expect(formatError(err)).toContain("status=408");
     expect(formatError(err)).toContain("Request Time-out");
     expect(formatError(err)).toContain("QR refs attempts ended");
+  });
+
+  it("extracts status from nested disconnect wrappers", () => {
+    expect(
+      getStatusCode({
+        error: {
+          output: {
+            statusCode: 515,
+          },
+        },
+      }),
+    ).toBe(515);
+    expect(
+      getStatusCode({
+        lastDisconnect: {
+          error: {
+            output: {
+              statusCode: 401,
+            },
+          },
+        },
+      }),
+    ).toBe(401);
   });
 
   it("does not clobber creds backup when creds.json is corrupted", async () => {
