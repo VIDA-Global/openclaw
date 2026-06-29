@@ -1162,6 +1162,7 @@ export const OpenClawSchema = z
                     enabled: z.boolean().optional(),
                     maxBodyBytes: z.number().int().positive().optional(),
                     maxUrlParts: z.number().int().nonnegative().optional(),
+                    toolResultMaxDataBytes: z.number().int().nonnegative().optional(),
                     files: z
                       .object({
                         ...ResponsesEndpointUrlFetchShape,

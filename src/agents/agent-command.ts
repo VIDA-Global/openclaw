@@ -1959,7 +1959,10 @@ async function agentCommandInternal(
               onLifecycleGenerationChanged: (nextLifecycleGeneration) => {
                 lifecycleGeneration = nextLifecycleGeneration;
               },
-              onAgentEvent: attemptLifecycleCallbacks.onAgentEvent,
+              onAgentEvent: (evt) => {
+                attemptLifecycleCallbacks.onAgentEvent(evt);
+                opts.onAgentEvent?.(evt);
+              },
               deferTerminalLifecycle: true,
             });
           },

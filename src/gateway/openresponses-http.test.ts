@@ -571,6 +571,35 @@ describe("OpenResponses HTTP API (e2e)", () => {
       expect(functionOutputMessage).toContain("Sunny, 70F.");
       await ensureResponseConsumed(resFunctionOutput);
 
+      agentCommand.mockClear();
+      agentCommand.mockResolvedValueOnce({ payloads: [{ text: "ok" }] } as never);
+      const resProviderMetadata = await postResponses(port, {
+        model: "openclaw",
+        input: "hi",
+        provider_metadata: { vida: { ignoreOnProviderRelay: true, reasoningEffort: "high" } },
+        reasoning: { effort: "high", summary: "concise" },
+      });
+      expect(resProviderMetadata.status).toBe(200);
+      const optsProviderMetadata = firstAgentOpts();
+      expect(optsProviderMetadata.providerMetadata).toEqual({
+        vida: { ignoreOnProviderRelay: true, reasoningEffort: "high" },
+      });
+      expect(optsProviderMetadata.reasoningLevel).toBe("stream");
+      await ensureResponseConsumed(resProviderMetadata);
+
+      agentCommand.mockClear();
+      agentCommand.mockResolvedValueOnce({ payloads: [{ text: "ok" }] } as never);
+      const resRelayMetadataFallback = await postResponses(port, {
+        model: "openclaw",
+        input: "hi",
+        metadata: { "vida.ignoreOnProviderRelay": "true" },
+      });
+      expect(resRelayMetadataFallback.status).toBe(200);
+      expect(firstAgentOpts().providerMetadata).toEqual({
+        vida: { ignoreOnProviderRelay: true },
+      });
+      await ensureResponseConsumed(resRelayMetadataFallback);
+
       mockAgentOnce([{ text: "ok" }]);
       const resInputFile = await postResponses(port, {
         model: "openclaw",
@@ -1684,6 +1713,72 @@ describe("OpenResponses HTTP API (e2e)", () => {
     const secondOpts = firstAgentOpts(1) as { sessionKey?: string } | undefined;
     expect(secondOpts?.sessionKey).toBe(firstSessionKey);
     await ensureResponseConsumed(secondResponse);
+  });
+
+  it("returns hosted internal tool outputs and reasoning as response output items", async () => {
+    const port = enabledPort;
+    agentCommand.mockClear();
+    agentCommand.mockImplementationOnce(async (opts: unknown) => {
+      const callbacks = opts as {
+        onAgentEvent?: (evt: { stream: string; data?: Record<string, unknown> }) => void;
+        onReasoningStream?: (payload: { text?: string }) => void;
+      };
+      callbacks.onReasoningStream?.({ text: "private reasoning" });
+      callbacks.onAgentEvent?.({
+        stream: "tool",
+        data: {
+          phase: "start",
+          name: "read",
+          toolCallId: "call_read_1",
+          args: { path: "README.md" },
+        },
+      });
+      callbacks.onAgentEvent?.({
+        stream: "tool",
+        data: {
+          phase: "result",
+          name: "read",
+          toolCallId: "call_read_1",
+          result: { content: [{ type: "text", text: "file contents" }] },
+          isError: false,
+        },
+      });
+      return { payloads: [{ text: "done" }] } as never;
+    });
+
+    const res = await postResponses(port, {
+      stream: false,
+      model: "openclaw",
+      input: "read a file",
+      reasoning: { summary: "concise" },
+    });
+
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { output?: Array<Record<string, unknown>> };
+    expect(json.output?.map((item) => item.type)).toEqual([
+      "reasoning",
+      "function_call",
+      "function_call_output",
+      "message",
+    ]);
+    expect(json.output?.[0]).toMatchObject({
+      type: "reasoning",
+      content: "private reasoning",
+      summary: "concise",
+    });
+    expect(json.output?.[1]).toMatchObject({
+      type: "function_call",
+      call_id: "call_read_1",
+      name: "read",
+      arguments: '{"path":"README.md"}',
+      status: "completed",
+    });
+    expect(json.output?.[2]).toMatchObject({
+      type: "function_call_output",
+      call_id: "call_read_1",
+      output: '{"content":[{"type":"text","text":"file contents"}]}',
+      status: "completed",
+    });
   });
 
   it("reuses prior sessions across different user values when auth scope matches", async () => {

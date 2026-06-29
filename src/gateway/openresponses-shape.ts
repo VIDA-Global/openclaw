@@ -38,3 +38,33 @@ export function createFunctionCallOutputItem(params: {
     status: params.status,
   };
 }
+
+/** Creates a function-call-result item for OpenResponses-compatible responses. */
+export function createFunctionCallResultOutputItem(params: {
+  id: string;
+  callId: string;
+  output: string;
+  status?: "in_progress" | "completed";
+}): OutputItem {
+  return {
+    type: "function_call_output",
+    id: params.id,
+    call_id: params.callId,
+    output: params.output,
+    status: params.status,
+  };
+}
+
+/** Creates a reasoning output item for OpenResponses-compatible responses. */
+export function createReasoningOutputItem(params: {
+  id: string;
+  content?: string;
+  summary?: string;
+}): OutputItem {
+  return {
+    type: "reasoning",
+    id: params.id,
+    ...(params.content ? { content: params.content } : {}),
+    ...(params.summary ? { summary: params.summary } : {}),
+  };
+}

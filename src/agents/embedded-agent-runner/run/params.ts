@@ -142,6 +142,10 @@ export type RunEmbeddedAgentParams = {
   imageOrder?: PromptImageOrderEntry[];
   /** Optional client-provided tools (OpenResponses hosted tools). */
   clientTools?: ClientToolDefinition[];
+  /** Provider metadata to preserve on transcript messages for hosted relay callers. */
+  providerMetadata?: Record<string, unknown>;
+  /** Hosted response cap for serialized tool-result payload data. */
+  toolResultMaxDataBytes?: number;
   /** Disable built-in tools for this run (LLM-only mode). */
   disableTools?: boolean;
   provider?: string;

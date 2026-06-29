@@ -333,6 +333,11 @@ export type GatewayHttpResponsesConfig = {
    * Default: 8.
    */
   maxUrlParts?: number;
+  /**
+   * Max decoded bytes of base64 tool-result data to preserve in hosted
+   * OpenResponses output. Omitted keeps normal tool-result image omission.
+   */
+  toolResultMaxDataBytes?: number;
   /** File inputs (input_file). */
   files?: GatewayHttpResponsesFilesConfig;
   /** Image inputs (input_image). */

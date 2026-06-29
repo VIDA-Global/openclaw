@@ -2186,6 +2186,7 @@ export async function runEmbeddedAttempt(
         config: params.config,
         contextWindowTokens: params.contextTokenBudget,
         inputProvenance: params.inputProvenance,
+        providerMetadata: params.providerMetadata,
         preparedUserTurnMessage,
         allowSyntheticToolResults: transcriptPolicy.allowSyntheticToolResults,
         missingToolResultText:
@@ -3559,6 +3560,7 @@ export async function runEmbeddedAttempt(
           reasoningMode: params.reasoningLevel ?? "off",
           thinkingLevel: params.thinkLevel,
           toolResultFormat: params.toolResultFormat,
+          toolResultMaxDataBytes: params.toolResultMaxDataBytes,
           shouldEmitToolResult: params.shouldEmitToolResult,
           shouldEmitToolOutput: params.shouldEmitToolOutput,
           sourceReplyDeliveryMode: params.sourceReplyDeliveryMode,

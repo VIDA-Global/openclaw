@@ -2092,6 +2092,8 @@ async function runEmbeddedAgentInternal(
             images: params.images,
             imageOrder: params.imageOrder,
             clientTools: params.clientTools,
+            providerMetadata: params.providerMetadata,
+            toolResultMaxDataBytes: params.toolResultMaxDataBytes,
             disableTools: params.disableTools,
             provider,
             modelId,

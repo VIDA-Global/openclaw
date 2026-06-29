@@ -245,7 +245,32 @@ describe("sanitizeToolResult", () => {
     };
     expect(sanitized.content[0].data).toBeUndefined();
     expect(sanitized.content[0].omitted).toBe(true);
-    expect(sanitized.content[0].bytes).toBe("base64imagedata".length);
+    expect(sanitized.content[0].bytes).toBe(11);
+  });
+
+  it("preserves image data within the hosted response byte cap", () => {
+    const data = Buffer.from("small image").toString("base64");
+    const result = {
+      content: [{ type: "image", data, mimeType: "image/png" }],
+    };
+    const sanitized = sanitizeToolResult(result, { maxDataBytes: 64 }) as {
+      content: Array<{ data?: string; omitted?: boolean }>;
+    };
+    expect(sanitized.content[0].data).toBe(data);
+    expect(sanitized.content[0].omitted).toBeUndefined();
+  });
+
+  it("omits image data above the hosted response byte cap", () => {
+    const data = Buffer.from("large image payload").toString("base64");
+    const result = {
+      content: [{ type: "image", data, mimeType: "image/png" }],
+    };
+    const sanitized = sanitizeToolResult(result, { maxDataBytes: 4 }) as {
+      content: Array<{ data?: string; bytes?: number; omitted?: boolean }>;
+    };
+    expect(sanitized.content[0].data).toBeUndefined();
+    expect(sanitized.content[0].omitted).toBe(true);
+    expect(sanitized.content[0].bytes).toBe("large image payload".length);
   });
 
   it("redacts secrets inside result.details (e.g. exec aggregated stdout)", () => {

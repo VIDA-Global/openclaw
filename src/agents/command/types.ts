@@ -63,6 +63,10 @@ export type AgentCommandOpts = {
   imageOrder?: PromptImageOrderEntry[];
   /** Optional client-provided tools (OpenResponses hosted tools). */
   clientTools?: ClientToolDefinition[];
+  /** Provider metadata to attach to persisted transcript messages for hosted relay callers. */
+  providerMetadata?: Record<string, unknown>;
+  /** Hosted response cap for serialized tool-result payload data. */
+  toolResultMaxDataBytes?: number;
   /** Agent id override (must exist in config). */
   agentId?: string;
   /** Per-run provider override. */
@@ -139,6 +143,8 @@ export type AgentCommandOpts = {
   streamParams?: AgentStreamParams;
   /** Resolved per-run fast mode from channel/directive handling. */
   fastMode?: FastMode;
+  /** Force reasoning stream handling for hosted response callers. */
+  reasoningLevel?: "off" | "on" | "stream";
   /** Resolved per-run auto cutoff seconds for fast mode. */
   fastModeAutoOnSeconds?: number;
   /** Explicit workspace directory override (for subagents to inherit parent workspace). */
@@ -157,6 +163,20 @@ export type AgentCommandOpts = {
   onActiveModelSelected?: (ctx: { provider: string; model: string }) => void;
   /** Called when compaction rotates the active run onto a successor session. */
   onSessionIdChanged?: (sessionId: string) => void;
+  /** Called with private reasoning deltas extracted by embedded subscriptions. */
+  onReasoningStream?: (payload: {
+    text?: string;
+    mediaUrls?: string[];
+    isReasoningSnapshot?: boolean;
+  }) => void | Promise<void>;
+  /** Called with sanitized internal tool results from embedded subscriptions. */
+  onAgentToolResult?: (event: { toolName: string; result: unknown; isError: boolean }) => void;
+  /** Called with embedded agent stream events for hosted response adapters. */
+  onAgentEvent?: (evt: {
+    stream: string;
+    data?: Record<string, unknown>;
+    sessionKey?: string;
+  }) => void;
   /** Internal one-shot model probe mode: no tools, no workspace/chat prompt policy. */
   modelRun?: boolean;
   /** Internal prompt-mode override for trusted local/gateway callsites. */

@@ -216,7 +216,23 @@ export function sanitizeToolArgs(args: unknown): unknown {
   return redactStringsDeep(args);
 }
 
-export function sanitizeToolResult(result: unknown): unknown {
+function estimateBase64Bytes(value: string): number {
+  const normalized = value.replace(/\s+/gu, "");
+  if (!normalized) {
+    return 0;
+  }
+  const padding = normalized.endsWith("==") ? 2 : normalized.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor((normalized.length * 3) / 4) - padding);
+}
+
+function shouldPreserveBase64Data(data: string | undefined, maxDataBytes: number | undefined) {
+  if (!data || typeof maxDataBytes !== "number" || !Number.isFinite(maxDataBytes)) {
+    return false;
+  }
+  return estimateBase64Bytes(data) <= Math.max(0, maxDataBytes);
+}
+
+export function sanitizeToolResult(result: unknown, opts?: { maxDataBytes?: number }): unknown {
   if (typeof result === "string") {
     return redactToolPayloadText(result);
   }
@@ -239,7 +255,10 @@ export function sanitizeToolResult(result: unknown): unknown {
       const entry = item as Record<string, unknown>;
       if (readStringValue(entry.type) === "image") {
         const data = readStringValue(entry.data);
-        const bytes = data ? data.length : undefined;
+        const bytes = data ? estimateBase64Bytes(data) : undefined;
+        if (shouldPreserveBase64Data(data, opts?.maxDataBytes)) {
+          return entry;
+        }
         const cleaned = { ...entry };
         delete cleaned.data;
         return Object.assign({}, cleaned, { bytes, omitted: true });

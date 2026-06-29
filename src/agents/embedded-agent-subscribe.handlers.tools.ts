@@ -1031,7 +1031,9 @@ export function handleToolExecutionUpdate(
   const toolName = normalizeToolName(evt.toolName);
   const toolCallId = evt.toolCallId;
   const partial = evt.partialResult;
-  const sanitized = sanitizeToolResult(partial);
+  const sanitized = sanitizeToolResult(partial, {
+    maxDataBytes: ctx.params.toolResultMaxDataBytes,
+  });
   const isExecTool = isExecToolName(toolName);
   const liveResult = isExecTool ? capLiveExecResult(sanitized) : sanitized;
   const toolProgress = isExecTool ? undefined : readChannelToolProgress(liveResult);
@@ -1124,7 +1126,9 @@ export async function handleToolExecutionEnd(
   const result = evt.result;
   const toolSendReceiptResult = ctx.consumeToolSendReceipt?.(toolCallId);
   const observerIsError = isError || isToolResultError(result);
-  const sanitizedResult = sanitizeToolResult(result);
+  const sanitizedResult = sanitizeToolResult(result, {
+    maxDataBytes: ctx.params.toolResultMaxDataBytes,
+  });
   const approvalUnavailable =
     isExecToolName(toolName) &&
     readExecToolDetails(sanitizedResult)?.status === "approval-unavailable";
