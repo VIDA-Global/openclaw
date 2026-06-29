@@ -138,6 +138,59 @@ openclaw message send --target +1234567890 --message "Hello from OpenClaw"
 openclaw agent --message "Ship checklist" --thinking high
 ```
 
+## VIDA Fork Deltas
+
+This repository tracks upstream OpenClaw releases and keeps a small set of VIDA-specific patches.
+Treat this section as the preservation contract for future upstream merges and release-tag syncs.
+
+Current upstream base for this fork line: `v2026.6.10`.
+
+Release-tag sync rule:
+
+- start from the target upstream release tag;
+- add only the retained VIDA fork commits;
+- validate the fork branch;
+- create the `vida-<upstream-tag>` fork tag only after the branch contains the final retained commits.
+
+Useful audit commands:
+
+```sh
+git log --oneline v2026.6.10..HEAD
+git diff v2026.6.10...HEAD
+```
+
+### Product/runtime deltas
+
+- Hosted `/v1/responses` compatibility:
+  VIDA keeps hosted OpenResponses behavior that current `vida.live` consumes:
+  `provider_metadata`, VIDA relay metadata fallback, reasoning stream/final output with stable IDs,
+  internal `function_call` / `function_call_output` output items, bounded tool-result data handling,
+  and request-input client-tool continuation.
+- Plugin request attribution for plugin-owned VIDA OpenAI traffic:
+  Some managed plugins create their own OpenAI-compatible clients instead of using OpenClaw model
+  providers. Plugin hook execution scopes add `x-openclaw-agent-id` and
+  `x-openclaw-session-key` only to plugin-owned `${VIDA_API_BASE_URL}/openai/v1/*` requests.
+- WhatsApp VIDA session compatibility:
+  VIDA preserves WhatsApp browser identity `["Vida Operator", "web", VERSION]` and nested
+  disconnect status extraction for logged-out handling.
+
+### Removed March fork delta
+
+- The old custom `vida-responses` model provider is intentionally not carried on this release line.
+  Provisioner-generated configs should use the stock `openai-responses` provider with per-agent
+  VIDA backend headers.
+
+### Fork operations deltas
+
+- Upstream/fork sync helpers:
+  `scripts/sync-upstream-main.sh`, `scripts/sync-upstream-release.sh`.
+- VIDA fork release validation and Docker alignment checks:
+  `scripts/verify-vida-release.sh`.
+- VIDA sync runbook and fork-tag workflow:
+  `scripts/README.vida-release-sync.md`.
+
+Update this section whenever a new fork-only patch is merged.
+
 Upgrading? [Updating guide](https://docs.openclaw.ai/install/updating) (and run `openclaw doctor`).
 
 Models config + CLI: [Models](https://docs.openclaw.ai/concepts/models). Auth profile rotation + fallbacks: [Model failover](https://docs.openclaw.ai/concepts/model-failover).
