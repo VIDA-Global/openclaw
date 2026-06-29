@@ -22,6 +22,7 @@ import {
 } from "./hook-runner-global-state.js";
 import type { PluginHookGatewayContext, PluginHookGatewayStopEvent } from "./hook-types.js";
 import { createHookRunner, type HookRunner } from "./hooks.js";
+import { installPluginRuntimeRequestAttributionFetch } from "./runtime/request-attribution-fetch.js";
 
 const getLog = () => createSubsystemLogger("plugins");
 
@@ -34,6 +35,7 @@ const getLog = () => createSubsystemLogger("plugins");
 export function initializeGlobalHookRunner(registry: GlobalHookRunnerRegistry): void {
   const state = getHookRunnerGlobalState();
   const log = getLog();
+  installPluginRuntimeRequestAttributionFetch();
   state.registry = registry;
   if (!state.hookRunner) {
     state.hookRunner = createHookRunner(createComposedHookRegistryFacade(state), {
