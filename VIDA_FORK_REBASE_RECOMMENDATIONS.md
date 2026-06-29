@@ -14,9 +14,10 @@ Assumptions for this update:
 
 - OpenClaw will be rebased from the used VIDA baseline, `vida-v2026.3.24`, onto upstream `v2026.6.10`.
 - `vida.live` backend behavior is unchanged.
-- Plugins are unchanged.
+- VIDA backend/plugin behavior is unchanged, but managed memory/context plugin package versions in `openclaw-docker` must be updated for the new OpenClaw baseline.
 - Provisioner changes are in scope.
 - Provisioner must update newly written configs and migrate existing persisted configs during image upgrade.
+- `openclaw-docker` changes are in scope because the VIDA image builds OpenClaw from source and does not inherit upstream OpenClaw's published Docker image.
 
 Primary outcome:
 
@@ -37,6 +38,10 @@ Provisioner must:
 - preserve existing auth/base URL behavior for `${VIDA_API_BASE_URL}/openai/v1`;
 - migrate persisted legacy configs during image upgrade;
 - repair or reject runtime config before OpenClaw starts if it still contains `api: "vida-responses"`.
+- update managed `lossless-claw` config from old aliases to current preferred keys:
+  - use `databasePath` instead of `dbPath`;
+  - use `sweepMaxDepth` instead of `incrementalMaxDepth`;
+- keep explicit `memory-lancedb-pro` `embedding` and `llm` config pointing at `${VIDA_API_BASE_URL}/openai/v1`; current plugin main still creates its own OpenAI-compatible clients and does not delegate to OpenClaw `models.providers`.
 
 Expected per-agent provider shape:
 
@@ -76,6 +81,53 @@ Expected per-agent provider shape:
   }
 }
 ```
+
+## Required openclaw-docker Changes
+
+These image changes are required to build and run the rebased OpenClaw correctly in VIDA-managed containers.
+
+`openclaw-docker` is not based on an upstream OpenClaw image. It starts from Node, clones `OPENCLAW_GIT_URL`/`OPENCLAW_GIT_REF`, builds OpenClaw source, and layers VIDA runtime/browser/plugin behavior. Upstream Dockerfile changes must therefore be pulled in manually where they affect the source build or runtime assumptions.
+
+Required image updates:
+
+- update the OpenClaw build base from floating `node:22-bookworm` to a pinned base that satisfies upstream `v2026.6.10` `engines.node >=22.19.0`; matching upstream's Node 24 base is the preferred path;
+- use the checked-out OpenClaw ref's `pnpm build:docker` instead of manually reconstructing the old March build sequence;
+- keep VIDA-specific postbuild steps only after `pnpm build:docker`;
+- run install/build with the checked-out OpenClaw ref's package manager, currently `pnpm@11.2.2+sha512...` at `v2026.6.10`;
+- adopt upstream Docker install flags for native/optional dependency consistency:
+  - `NODE_OPTIONS=--max-old-space-size=2048`;
+  - `--config.supportedArchitectures.os=linux`;
+  - `--config.supportedArchitectures.cpu="$(node -p 'process.arch')"`;
+  - `--config.supportedArchitectures.libc=glibc`;
+- add runtime utilities expected by upstream image/runtime paths that are currently missing from VIDA's explicit apt list:
+  - `hostname`;
+  - `lsof`;
+  - `openssl`;
+  - `tini`;
+- run the container entrypoint under `tini` or otherwise preserve equivalent signal forwarding and child-process reaping for the gateway/browser processes.
+
+Managed plugin package updates:
+
+- update `@martian-engineering/lossless-claw` from `0.3.0` to `0.13.1`;
+- verify the bundled `lossless-claw` package has:
+  - `openclaw.plugin.json`;
+  - `dist/index.js`;
+- replace npm `memory-lancedb-pro@1.1.0-beta.9` with a pinned GitHub main commit because npm releases are stale for the new OpenClaw baseline:
+  - repository: `https://github.com/CortexReach/memory-lancedb-pro.git`;
+  - commit reviewed: `1f44e05caeca45c00531cef366bac8521ddad2e3`;
+  - package version at that commit: `1.1.0-beta.11`;
+- install `memory-lancedb-pro` via `npm pack github:CortexReach/memory-lancedb-pro#<commit>` followed by `npm install -g ./memory-lancedb-pro-*.tgz --omit=dev`;
+- do not use direct global GitHub install for `memory-lancedb-pro`; it failed with npm status `236` / `ENOTDIR` during validation;
+- verify the bundled `memory-lancedb-pro` package has:
+  - `openclaw.plugin.json`;
+  - `dist/index.js`.
+
+Browser runtime update:
+
+- VIDA's default browser path uses `openclaw-docker/scripts/browser-lazy-supervisor.mjs`, not upstream `scripts/sandbox-browser-entrypoint.sh`;
+- upstream `v2026.6.10` added CDP relay hardening to `sandbox-browser-entrypoint.sh`, including `OPENCLAW_BROWSER_CDP_AUTH_TOKEN`, port validation, cleanup traps, and authenticated relay behavior;
+- reconcile that hardening with VIDA's lazy supervisor before release; validate that provisioner/router auth prevents unauthenticated external CDP access, and port upstream token-relay behavior if it does not;
+- keep the legacy `OPENCLAW_BROWSER_LAZY_START=0` path compatible with the new upstream `sandbox-browser-entrypoint.sh` if that path remains supported.
 
 ## OpenClaw Fork Decisions
 
@@ -180,21 +232,30 @@ Implementation evidence:
 ## Rebase Order
 
 1. Start from upstream `v2026.6.10`.
-2. Update provisioner generated-config normalization for stock OpenAI-compatible VIDA providers.
-3. Add provisioner image-upgrade migration for persisted configs containing `api: "vida-responses"`.
-4. Remove `vida-responses` provider/schema/runtime registration from OpenClaw.
-5. Reapply hosted `/v1/responses` compatibility patches listed above.
-6. Keep plugin-owned Vida OpenAI request attribution.
-7. Drop `onBlockReply` synchronous dispatch change.
-8. Drop broad browser reliability patches, then smoke test and re-add only narrow failures.
-9. Keep WhatsApp VIDA-specific patches.
-10. Keep release workflow docs/scripts and update README fork deltas.
+2. Update `openclaw-docker` so it can build the rebased OpenClaw ref with the new Node/package-manager/build assumptions.
+3. Update `openclaw-docker` managed plugin packages: `lossless-claw@0.13.1` and pinned `memory-lancedb-pro` main.
+4. Update provisioner generated-config normalization for stock OpenAI-compatible VIDA providers.
+5. Update provisioner managed plugin config for current `lossless-claw` and `memory-lancedb-pro`.
+6. Add provisioner image-upgrade migration for persisted configs containing `api: "vida-responses"` and old managed-plugin config aliases.
+7. Remove `vida-responses` provider/schema/runtime registration from OpenClaw.
+8. Reapply hosted `/v1/responses` compatibility patches listed above.
+9. Keep plugin-owned Vida OpenAI request attribution.
+10. Drop `onBlockReply` synchronous dispatch change.
+11. Drop broad browser reliability patches, then smoke test and re-add only narrow failures.
+12. Keep WhatsApp VIDA-specific patches.
+13. Keep release workflow docs/scripts and update README fork deltas.
 
 ## Validation Checklist
 
 - Generated provisioner config contains no `api: "vida-responses"`.
 - Upgraded persisted configs are migrated before OpenClaw starts.
 - Multi-agent gateway config keeps one stock provider per agent ID.
+- Provisioner-generated `lossless-claw` config uses `databasePath` and `sweepMaxDepth`.
+- Provisioner-generated `memory-lancedb-pro` config keeps explicit `embedding` and `llm` Vida OpenAI-compatible settings.
+- `openclaw-docker` builds the rebased OpenClaw ref with `pnpm build:docker`.
+- `openclaw-docker` runtime Node version satisfies the rebased OpenClaw `engines.node`.
+- Bundled `/app/extensions/lossless-claw` contains `openclaw.plugin.json` and `dist/index.js`.
+- Bundled `/app/extensions/memory-lancedb-pro` contains `openclaw.plugin.json` and `dist/index.js`.
 - Outbound model calls to `${VIDA_API_BASE_URL}/openai/v1` include `x-vida-account-id` and `x-openclaw-agent-id`.
 - Hosted `/v1/responses` accepts `provider_metadata`.
 - Hosted `/v1/responses` accepts `reasoning.effort` and `reasoning.summary`.
@@ -204,3 +265,4 @@ Implementation evidence:
 - Plugin-owned Vida OpenAI requests receive `x-openclaw-agent-id` and `x-openclaw-session-key`.
 - WhatsApp VIDA-specific defaults still pass existing tests.
 - Browser smoke tests pass on upstream `v2026.6.10` baseline plus remaining VIDA patches.
+- Browser CDP/noVNC exposure remains protected after reconciling upstream `sandbox-browser-entrypoint.sh` hardening with VIDA's `browser-lazy-supervisor.mjs`.
