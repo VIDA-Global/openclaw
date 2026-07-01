@@ -23,13 +23,17 @@ import type { AnnotationItem } from "./screenshot-annotate.js";
 export type { BrowserStatus, BrowserTab, BrowserTransport } from "./client.types.js";
 export type { BrowserDoctorCheck, BrowserDoctorReport } from "./doctor.js";
 
-const BROWSER_STATUS_REQUEST_TIMEOUT_MS = 7_500;
 const BROWSER_DOCTOR_REQUEST_TIMEOUT_MS = 7_500;
 const BROWSER_DEEP_DOCTOR_REQUEST_TIMEOUT_MS = 10_000;
+const BROWSER_READ_REQUEST_TIMEOUT_MS = 10_000;
+const BROWSER_READ_RETRY_COUNT = 1;
+const BROWSER_READ_RETRY_DELAY_MS = 1_500;
 const JSON_HEADERS = { "Content-Type": "application/json" };
 
 type BrowserClientTimeoutOptions = {
   timeoutMs?: number;
+  retryCount?: number;
+  retryDelayMs?: number;
 };
 
 type BrowserClientProfileOptions = BrowserClientTimeoutOptions & {
@@ -41,6 +45,54 @@ function resolveBrowserClientTimeoutMs(
   fallbackMs: number,
 ): number {
   return resolveTimerTimeoutMs(opts?.timeoutMs, fallbackMs);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function resolveBrowserClientRetryCount(opts: BrowserClientTimeoutOptions | undefined): number {
+  const retryCount = opts?.retryCount;
+  return typeof retryCount === "number" && Number.isFinite(retryCount)
+    ? Math.max(0, Math.floor(retryCount))
+    : BROWSER_READ_RETRY_COUNT;
+}
+
+function resolveBrowserClientRetryDelayMs(opts: BrowserClientTimeoutOptions | undefined): number {
+  const retryDelayMs = opts?.retryDelayMs;
+  return typeof retryDelayMs === "number" && Number.isFinite(retryDelayMs)
+    ? Math.max(0, Math.floor(retryDelayMs))
+    : BROWSER_READ_RETRY_DELAY_MS;
+}
+
+function isBrowserControlTimeoutError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+  if (!message.includes("timed out") && !message.includes("timeout")) {
+    return false;
+  }
+  return message.includes("browser") || message.includes("cdp");
+}
+
+async function withBrowserReadRetry<T>(
+  run: () => Promise<T>,
+  opts: BrowserClientTimeoutOptions | undefined,
+): Promise<T> {
+  const retryCount = resolveBrowserClientRetryCount(opts);
+  const retryDelayMs = resolveBrowserClientRetryDelayMs(opts);
+  let attempt = 0;
+  for (;;) {
+    try {
+      return await run();
+    } catch (err) {
+      if (!isBrowserControlTimeoutError(err) || attempt >= retryCount) {
+        throw err;
+      }
+      attempt += 1;
+      if (retryDelayMs > 0) {
+        await sleep(retryDelayMs);
+      }
+    }
+  }
 }
 
 function withProfilePath(baseUrl: string | undefined, path: string, profile?: string): string {
@@ -139,11 +191,15 @@ export type SnapshotResult =
 /** Read browser-control status for the selected profile. */
 export async function browserStatus(
   baseUrl?: string,
-  opts?: { profile?: string; timeoutMs?: number },
+  opts?: { profile?: string; timeoutMs?: number; retryCount?: number; retryDelayMs?: number },
 ): Promise<BrowserStatus> {
-  return await fetchBrowserJson<BrowserStatus>(withProfilePath(baseUrl, "/", opts?.profile), {
-    timeoutMs: resolveBrowserClientTimeoutMs(opts, BROWSER_STATUS_REQUEST_TIMEOUT_MS),
-  });
+  return await withBrowserReadRetry(
+    async () =>
+      await fetchBrowserJson<BrowserStatus>(withProfilePath(baseUrl, "/", opts?.profile), {
+        timeoutMs: resolveBrowserClientTimeoutMs(opts, BROWSER_READ_REQUEST_TIMEOUT_MS),
+      }),
+    opts,
+  );
 }
 
 /** Run browser doctor checks for the selected profile. */
@@ -169,13 +225,14 @@ export async function browserDoctor(
 /** List configured browser profiles and their current status. */
 export async function browserProfiles(
   baseUrl?: string,
-  opts?: { timeoutMs?: number },
+  opts?: { timeoutMs?: number; retryCount?: number; retryDelayMs?: number },
 ): Promise<ProfileStatus[]> {
-  const res = await fetchBrowserJson<{ profiles: ProfileStatus[] }>(
-    withBaseUrl(baseUrl, `/profiles`),
-    {
-      timeoutMs: resolveBrowserClientTimeoutMs(opts, 3000),
-    },
+  const res = await withBrowserReadRetry(
+    async () =>
+      await fetchBrowserJson<{ profiles: ProfileStatus[] }>(withBaseUrl(baseUrl, `/profiles`), {
+        timeoutMs: resolveBrowserClientTimeoutMs(opts, BROWSER_READ_REQUEST_TIMEOUT_MS),
+      }),
+    opts,
   );
   return res.profiles ?? [];
 }
@@ -275,13 +332,17 @@ export async function browserDeleteProfile(
 /** List tabs for the selected browser profile. */
 export async function browserTabs(
   baseUrl?: string,
-  opts?: { profile?: string; timeoutMs?: number },
+  opts?: { profile?: string; timeoutMs?: number; retryCount?: number; retryDelayMs?: number },
 ): Promise<BrowserTab[]> {
-  const res = await fetchBrowserJson<{ running: boolean; tabs: BrowserTab[] }>(
-    withProfilePath(baseUrl, "/tabs", opts?.profile),
-    {
-      timeoutMs: resolveBrowserClientTimeoutMs(opts, 3000),
-    },
+  const res = await withBrowserReadRetry(
+    async () =>
+      await fetchBrowserJson<{ running: boolean; tabs: BrowserTab[] }>(
+        withProfilePath(baseUrl, "/tabs", opts?.profile),
+        {
+          timeoutMs: resolveBrowserClientTimeoutMs(opts, BROWSER_READ_REQUEST_TIMEOUT_MS),
+        },
+      ),
+    opts,
   );
   return res.tabs ?? [];
 }

@@ -122,6 +122,7 @@ function createRouteContext(
     state: () => ({
       resolved: {
         actionTimeoutMs: options?.actionTimeoutMs ?? 45_000,
+        remoteCdpTimeoutMs: 4000,
         ssrfPolicy: options?.ssrfPolicy,
       },
     }),
@@ -251,14 +252,45 @@ describe("browser tab routes", () => {
     expect(isReachable).toHaveBeenNthCalledWith(2, 45_000, { signal: abort.signal });
   });
 
-  it("keeps the short reachability probe for non-Chrome-MCP tab routes", async () => {
+  it("keeps the short reachability probe for local managed tab routes", async () => {
     const isReachable = vi.fn(async () => true);
-    const profileCtx = createProfileContext({ isReachable });
+    const profileCtx = createProfileContext({
+      profile: {
+        ...baseProfileContext().profile,
+        driver: "openclaw",
+        cdpIsLoopback: true,
+      } as never,
+      isReachable,
+    });
 
     const response = await callTabsList({ profileCtx });
 
     expect(response.statusCode).toBe(200);
     expect(isReachable).toHaveBeenCalledWith(300);
+  });
+
+  it("uses a cold-start-safe reachability timeout for remote CDP tab routes", async () => {
+    const isReachable = vi.fn(async () => true);
+    const abort = new AbortController();
+    const profileCtx = createProfileContext({
+      profile: {
+        ...baseProfileContext().profile,
+        cdpIsLoopback: false,
+      } as never,
+      isReachable,
+    });
+
+    const listResponse = await callTabsList({ profileCtx, signal: abort.signal });
+    const actionResponse = await callTabsAction({
+      profileCtx,
+      body: { action: "list" },
+      signal: abort.signal,
+    });
+
+    expect(listResponse.statusCode).toBe(200);
+    expect(actionResponse.statusCode).toBe(200);
+    expect(isReachable).toHaveBeenNthCalledWith(1, 10_000, { signal: abort.signal });
+    expect(isReachable).toHaveBeenNthCalledWith(2, 10_000, { signal: abort.signal });
   });
 
   it("normalizes configured existing-session tab reachability timeouts", async () => {
