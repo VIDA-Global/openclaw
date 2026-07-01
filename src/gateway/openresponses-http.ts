@@ -928,8 +928,7 @@ export async function handleOpenResponsesHttpRequest(
         additionalOutputItems.unshift(
           createReasoningOutputItem({
             id: reasoningItemId,
-            content: reasoningText,
-            ...(reasoningSummary ? { summary: reasoningSummary } : {}),
+            ...(reasoningSummary ? { summary: reasoningText } : { content: reasoningText }),
           }),
         );
       }
@@ -1117,7 +1116,6 @@ export async function handleOpenResponsesHttpRequest(
         output_index: reasoningOutputIndex,
         item: createReasoningOutputItem({
           id: reasoningItemId,
-          ...(reasoningSummary ? { summary: reasoningSummary } : {}),
         }),
       });
     }
@@ -1137,8 +1135,7 @@ export async function handleOpenResponsesHttpRequest(
     }
     const item = createReasoningOutputItem({
       id: reasoningItemId,
-      content: reasoningText,
-      ...(reasoningSummary ? { summary: reasoningSummary } : {}),
+      ...(reasoningSummary ? { summary: reasoningText } : { content: reasoningText }),
     });
     additionalOutputItems.push(item);
     writeSseEvent(res, {

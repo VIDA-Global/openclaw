@@ -1802,9 +1802,9 @@ describe("OpenResponses HTTP API (e2e)", () => {
     ]);
     expect(json.output?.[0]).toMatchObject({
       type: "reasoning",
-      content: "private reasoning",
-      summary: "concise",
+      summary: "private reasoning",
     });
+    expect(json.output?.[0]).not.toHaveProperty("content");
     expect(json.output?.[1]).toMatchObject({
       type: "function_call",
       call_id: "call_read_1",
@@ -1850,6 +1850,17 @@ describe("OpenResponses HTTP API (e2e)", () => {
       .filter((event) => event.event === "response.reasoning_text.delta")
       .map((event) => (parseSseData(event) as { delta?: string }).delta);
     expect(reasoningDeltas).toEqual(["private ", "reasoning"]);
+
+    const completedReasoningItem = events
+      .filter((event) => event.event === "response.output_item.done")
+      .map((event) => parseSseData(event) as { item?: Record<string, unknown> })
+      .map((event) => event.item)
+      .find((item) => item?.type === "reasoning");
+    expect(completedReasoningItem).toMatchObject({
+      type: "reasoning",
+      summary: "private reasoning",
+    });
+    expect(completedReasoningItem?.summary).not.toBe("auto");
   });
 
   it("reuses prior sessions across different user values when auth scope matches", async () => {
