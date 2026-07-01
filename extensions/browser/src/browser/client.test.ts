@@ -68,6 +68,25 @@ describe("browser client", () => {
     await expect(browserStatus("http://127.0.0.1:18791")).rejects.toThrow(/cancelled/i);
   });
 
+  it("retries read-only tab requests once after timeout-like browser failures", async () => {
+    const fetch = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("timed out"))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          running: true,
+          tabs: [{ targetId: "t1", title: "Tab", url: "https://example.com", type: "page" }],
+        }),
+      } as unknown as Response);
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(browserTabs("http://127.0.0.1:18791", { retryDelayMs: 0 })).resolves.toHaveLength(
+      1,
+    );
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it("surfaces non-2xx responses with body text", async () => {
     vi.stubGlobal(
       "fetch",
@@ -380,7 +399,7 @@ describe("browser client", () => {
     expect(urls.some((url) => url.endsWith("/doctor"))).toBe(true);
     expect(urls.some((url) => url.endsWith("/doctor?profile=openclaw&deep=true"))).toBe(true);
     const status = calls.find((c) => c.url.endsWith("/"));
-    expect(status?.init?.timeoutMs).toBe(7_500);
+    expect(status?.init?.timeoutMs).toBe(10_000);
     const doctor = calls.find((c) => c.url.endsWith("/doctor"));
     expect(doctor?.init?.timeoutMs).toBe(7_500);
     const deepDoctor = calls.find((c) => c.url.endsWith("/doctor?profile=openclaw&deep=true"));

@@ -24,6 +24,7 @@ import type { BrowserRequest, BrowserResponse, BrowserRouteRegistrar } from "./t
 import { asyncBrowserRoute, jsonError, toStringOrEmpty } from "./utils.js";
 
 const DEFAULT_TAB_REACHABILITY_TIMEOUT_MS = 300;
+const DEFAULT_REMOTE_TAB_REACHABILITY_TIMEOUT_MS = 10_000;
 
 function handleTabsRouteError(
   ctx: BrowserRouteContext,
@@ -62,13 +63,18 @@ function resolveTabReachabilityTimeoutMs(
   ctx: BrowserRouteContext,
   profileCtx: ProfileContext,
 ): number {
-  if (!getBrowserProfileCapabilities(profileCtx.profile).usesChromeMcp) {
-    return DEFAULT_TAB_REACHABILITY_TIMEOUT_MS;
+  const capabilities = getBrowserProfileCapabilities(profileCtx.profile);
+  if (capabilities.usesChromeMcp) {
+    return (
+      clampPositiveTimerTimeoutMs(ctx.state().resolved.actionTimeoutMs) ??
+      DEFAULT_TAB_REACHABILITY_TIMEOUT_MS
+    );
   }
-  return (
-    clampPositiveTimerTimeoutMs(ctx.state().resolved.actionTimeoutMs) ??
-    DEFAULT_TAB_REACHABILITY_TIMEOUT_MS
-  );
+  if (capabilities.isRemote) {
+    const remoteTimeoutMs = clampPositiveTimerTimeoutMs(ctx.state().resolved.remoteCdpTimeoutMs);
+    return Math.max(remoteTimeoutMs ?? 0, DEFAULT_REMOTE_TAB_REACHABILITY_TIMEOUT_MS);
+  }
+  return DEFAULT_TAB_REACHABILITY_TIMEOUT_MS;
 }
 
 async function checkTabReachability(
