@@ -387,6 +387,22 @@ export const ReasoningDeltaEventSchema = z.object({
   delta: z.string(),
 });
 
+export const ReasoningTextDeltaEventSchema = z.object({
+  type: z.literal("response.reasoning_text.delta"),
+  item_id: z.string(),
+  output_index: z.number().int().nonnegative(),
+  content_index: z.number().int().nonnegative(),
+  delta: z.string(),
+});
+
+export const ReasoningTextDoneEventSchema = z.object({
+  type: z.literal("response.reasoning_text.done"),
+  item_id: z.string(),
+  output_index: z.number().int().nonnegative(),
+  content_index: z.number().int().nonnegative(),
+  text: z.string(),
+});
+
 export type StreamingEvent =
   | z.infer<typeof ResponseCreatedEventSchema>
   | z.infer<typeof ResponseInProgressEventSchema>
@@ -398,4 +414,6 @@ export type StreamingEvent =
   | z.infer<typeof ContentPartDoneEventSchema>
   | z.infer<typeof OutputTextDeltaEventSchema>
   | z.infer<typeof OutputTextDoneEventSchema>
-  | z.infer<typeof ReasoningDeltaEventSchema>;
+  | z.infer<typeof ReasoningDeltaEventSchema>
+  | z.infer<typeof ReasoningTextDeltaEventSchema>
+  | z.infer<typeof ReasoningTextDoneEventSchema>;

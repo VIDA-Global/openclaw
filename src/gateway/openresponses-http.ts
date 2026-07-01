@@ -284,6 +284,50 @@ function resolveResponsesLimits(
   };
 }
 
+function normalizeLegacyWrappedResponseTools(body: unknown): unknown {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return body;
+  }
+  const record = body as Record<string, unknown>;
+  if (!Array.isArray(record.tools)) {
+    return body;
+  }
+
+  let changed = false;
+  const tools = record.tools.map((tool) => {
+    if (!tool || typeof tool !== "object" || Array.isArray(tool)) {
+      return tool;
+    }
+    const toolRecord = tool as Record<string, unknown>;
+    if (toolRecord.type !== "function" || typeof toolRecord.name === "string") {
+      return tool;
+    }
+    const wrapped = toolRecord.function;
+    if (!wrapped || typeof wrapped !== "object" || Array.isArray(wrapped)) {
+      return tool;
+    }
+    const wrappedRecord = wrapped as Record<string, unknown>;
+    if (typeof wrappedRecord.name !== "string") {
+      return tool;
+    }
+    changed = true;
+    return {
+      type: "function",
+      name: wrappedRecord.name,
+      description: wrappedRecord.description,
+      parameters: wrappedRecord.parameters,
+      strict:
+        typeof toolRecord.strict === "boolean"
+          ? toolRecord.strict
+          : typeof wrappedRecord.strict === "boolean"
+            ? wrappedRecord.strict
+            : undefined,
+    };
+  });
+
+  return changed ? { ...record, tools } : body;
+}
+
 function extractClientTools(body: CreateResponseBody): ClientToolDefinition[] {
   // Normalize from Responses API flat format to the internal wrapped format.
   return (body.tools ?? []).map((tool) => ({
@@ -532,8 +576,12 @@ export async function handleOpenResponsesHttpRequest(
     sendMissingScopeForbidden(res, modelOverrideAuth.missingScope);
     return true;
   }
-  // Validate request body with Zod
-  const parseResult = CreateResponseBodySchema.safeParse(handled.body);
+  // Validate request body with Zod. The schema stays aligned to the flat
+  // Responses API tool format, but the HTTP edge accepts the legacy wrapped
+  // Chat Completions shape emitted by older VIDA provider builds.
+  const parseResult = CreateResponseBodySchema.safeParse(
+    normalizeLegacyWrappedResponseTools(handled.body),
+  );
   if (!parseResult.success) {
     const issue = parseResult.error.issues[0];
     const message = issue ? `${issue.path.join(".")}: ${issue.message}` : "Invalid request body";
@@ -1075,9 +1123,10 @@ export async function handleOpenResponsesHttpRequest(
     }
     reasoningText += delta;
     writeSseEvent(res, {
-      type: "response.reasoning.delta",
+      type: "response.reasoning_text.delta",
       item_id: reasoningItemId,
       output_index: reasoningOutputIndex,
+      content_index: 0,
       delta,
     });
   };
@@ -1092,6 +1141,13 @@ export async function handleOpenResponsesHttpRequest(
       ...(reasoningSummary ? { summary: reasoningSummary } : {}),
     });
     additionalOutputItems.push(item);
+    writeSseEvent(res, {
+      type: "response.reasoning_text.done",
+      item_id: reasoningItemId,
+      output_index: reasoningOutputIndex,
+      content_index: 0,
+      text: reasoningText,
+    });
     writeSseEvent(res, {
       type: "response.output_item.done",
       output_index: reasoningOutputIndex,
