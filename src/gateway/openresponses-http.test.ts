@@ -757,6 +757,45 @@ describe("OpenResponses HTTP API (e2e)", () => {
 
       mockAgentOnce([{ text: "ok" }], {
         stopReason: "tool_calls",
+        pendingToolCalls: [{ id: "call_1", name: "get_weather", arguments: "{}" }],
+      });
+      const resLegacyWrappedTools = await postResponses(port, {
+        model: "openclaw",
+        input: "hi",
+        tools: [
+          {
+            type: "function",
+            function: {
+              name: "get_weather",
+              description: "Get weather",
+              parameters: {
+                type: "object",
+                properties: {
+                  location: { type: "string" },
+                },
+              },
+              strict: true,
+            },
+          },
+        ],
+        tool_choice: { type: "function", function: { name: "get_weather" } },
+      });
+      expect(resLegacyWrappedTools.status).toBe(200);
+      const legacyWrappedClientTools =
+        (
+          firstAgentOpts() as
+            | {
+                clientTools?: Array<{ function?: { name?: string; strict?: boolean } }>;
+              }
+            | undefined
+        )?.clientTools ?? [];
+      expect(legacyWrappedClientTools).toHaveLength(1);
+      expect(legacyWrappedClientTools[0]?.function?.name).toBe("get_weather");
+      expect(legacyWrappedClientTools[0]?.function?.strict).toBe(true);
+      await ensureResponseConsumed(resLegacyWrappedTools);
+
+      mockAgentOnce([{ text: "ok" }], {
+        stopReason: "tool_calls",
         pendingToolCalls: [{ id: "call_1", name: "get_time", arguments: "{}" }],
       });
       const resWrappedToolChoice = await postResponses(port, {
@@ -1702,6 +1741,38 @@ describe("OpenResponses HTTP API (e2e)", () => {
       output: '{"content":[{"type":"text","text":"file contents"}]}',
       status: "completed",
     });
+  });
+
+  it("streams reasoning using provider-compatible reasoning text events", async () => {
+    const port = enabledPort;
+    agentCommand.mockClear();
+    agentCommand.mockImplementationOnce(async (opts: unknown) => {
+      const callbacks = opts as {
+        onReasoningStream?: (payload: { text?: string }) => void;
+      };
+      callbacks.onReasoningStream?.({ text: "private " });
+      callbacks.onReasoningStream?.({ text: "reasoning" });
+      return { payloads: [{ text: "done" }] } as never;
+    });
+
+    const res = await postResponses(port, {
+      stream: true,
+      model: "openclaw",
+      input: "think privately",
+      reasoning: { summary: "auto" },
+    });
+
+    expect(res.status).toBe(200);
+    const events = parseSseEvents(await res.text());
+    const eventTypes = collectSseEventTypes(events);
+    expect(eventTypes).toContain("response.reasoning_text.delta");
+    expect(eventTypes).toContain("response.reasoning_text.done");
+    expect(eventTypes).not.toContain("response.reasoning.delta");
+
+    const reasoningDeltas = events
+      .filter((event) => event.event === "response.reasoning_text.delta")
+      .map((event) => (parseSseData(event) as { delta?: string }).delta);
+    expect(reasoningDeltas).toEqual(["private ", "reasoning"]);
   });
 
   it("reuses prior sessions across different user values when auth scope matches", async () => {
