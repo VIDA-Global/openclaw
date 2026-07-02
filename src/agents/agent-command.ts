@@ -416,6 +416,34 @@ async function persistSessionEntry(
   });
 }
 
+function buildRunSessionEntryPatch(params: {
+  current: SessionEntry;
+  sessionId: string;
+  updatedAt: number;
+  patch?: Partial<SessionEntry>;
+}): SessionEntry {
+  const rotatedSession = params.current.sessionId !== params.sessionId;
+  return {
+    ...(rotatedSession ? {} : params.current),
+    ...(params.patch ?? {}),
+    sessionId: params.sessionId,
+    updatedAt: params.updatedAt,
+    sessionStartedAt: rotatedSession
+      ? params.updatedAt
+      : (params.current.sessionStartedAt ?? params.updatedAt),
+    ...(rotatedSession
+      ? {
+          sessionFile: undefined,
+          status: undefined,
+          startedAt: undefined,
+          endedAt: undefined,
+          runtimeMs: undefined,
+          abortedLastRun: undefined,
+        }
+      : {}),
+  };
+}
+
 function clearPendingFinalDeliveryFields(entry: SessionEntry, updatedAt: number): SessionEntry {
   return {
     ...entry,
@@ -931,13 +959,15 @@ async function agentCommandInternal(
         sessionEntry: entry,
       });
       assertAgentRunLifecycleGenerationCurrent(lifecycleGeneration);
-      const next: SessionEntry = {
-        ...entry,
+      const next = buildRunSessionEntryPatch({
+        current: entry,
         sessionId,
         updatedAt: now,
-        restartRecoveryDeliveryContext: currentRunDeliveryContext,
-        restartRecoveryDeliveryRunId: currentRunDeliveryContext ? runId : undefined,
-      };
+        patch: {
+          restartRecoveryDeliveryContext: currentRunDeliveryContext,
+          restartRecoveryDeliveryRunId: currentRunDeliveryContext ? runId : undefined,
+        },
+      });
       const persisted = await persistSessionEntry({
         sessionStore,
         sessionKey,
@@ -1220,13 +1250,12 @@ async function agentCommandInternal(
         updatedAt: now,
         sessionStartedAt: now,
       };
-      const next: SessionEntry = {
-        ...current,
+      const next = buildRunSessionEntryPatch({
+        current,
         sessionId,
         updatedAt: now,
-        sessionStartedAt: current.sessionStartedAt ?? now,
-        skillsSnapshot,
-      };
+        patch: { skillsSnapshot },
+      });
       await persistSessionEntry({
         sessionStore,
         sessionKey,
@@ -1249,13 +1278,12 @@ async function agentCommandInternal(
       const now = Date.now();
       const entry = sessionStore[sessionKey] ??
         sessionEntry ?? { sessionId, updatedAt: now, sessionStartedAt: now };
-      const next: SessionEntry = {
-        ...entry,
+      const next = buildRunSessionEntryPatch({
+        current: entry,
         sessionId,
         updatedAt: now,
-        sessionStartedAt: entry.sessionStartedAt ?? now,
-        lastInteractionAt: now,
-      };
+        patch: { lastInteractionAt: now },
+      });
       if (thinkOverride) {
         next.thinkingLevel = thinkOverride;
       }

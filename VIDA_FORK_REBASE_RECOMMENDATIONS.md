@@ -148,11 +148,20 @@ Browser runtime update:
 | `toolResultMaxDataBytes` and binary/base64 tool-result sanitization                                              | Keep                       | Current fork uses this to bound hosted tool-result payloads.                                                                                                                                              |
 | Plugin-owned Vida OpenAI request attribution                                                                     | Keep                       | `memory-lancedb-pro` still creates its own OpenAI-compatible embedding and smart-extraction clients, bypassing normal model provider config.                                                              |
 | AsyncLocalStorage/global fetch attribution wrapper                                                               | Keep                       | Needed to add `x-openclaw-agent-id` and `x-openclaw-session-key` to plugin-owned `${VIDA_API_BASE_URL}/openai/v1/*` requests.                                                                             |
+| Agent command session lifecycle reset                                                                            | Keep targeted patch        | VIDA gateway chat can enter through `agentCommandFromIngress` with only `sessionKey`; see note below.                                                                                                     |
 | `onBlockReply` synchronous dispatch change                                                                       | Drop                       | No concrete dependency was found for changing upstream callback scheduling.                                                                                                                               |
 | Browser reliability patches                                                                                      | Drop broad patch           | Upstream browser internals changed heavily after March. Validate browser flows after rebase and only add focused fixes for reproduced failures.                                                           |
 | WhatsApp browser identity and nested disconnect status extraction                                                | Keep                       | VIDA-specific operational defaults/status handling.                                                                                                                                                       |
 | Release sync scripts/docs                                                                                        | Keep                       | Fork operations tooling.                                                                                                                                                                                  |
 | README VIDA fork delta section                                                                                   | Keep/update                | Should match the final rebase decisions.                                                                                                                                                                  |
+
+Agent command session lifecycle reset:
+
+- VIDA gateway chat can call `agentCommandFromIngress` with only `sessionKey`, unlike the native UI path that also patches the session entry before dispatch.
+- In upstream 6.11, early agent-command writes could replace `sessionId` while preserving stale lifecycle metadata from the previous session.
+- The symptom is repeated daily-reset session rotation: "Session restarted. Continuing in this same conversation." can appear on every gateway message while native UI chats do not reproduce it.
+- Keep the local `buildRunSessionEntryPatch` helper in `src/agents/agent-command.ts`; it resets lifecycle metadata whenever those early writes rotate the session id.
+- Coverage lives in `src/agents/agent-command.live-model-switch.test.ts`.
 
 ## Hosted OpenResponses Implementation Notes
 

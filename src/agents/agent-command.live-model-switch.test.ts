@@ -69,6 +69,7 @@ const state = vi.hoisted(() => ({
   sessionStoreMock: undefined as unknown,
   storePathMock: undefined as string | undefined,
   resolvedSessionKeyMock: undefined as string | undefined,
+  resolvedSessionIdMock: undefined as string | undefined,
 }));
 
 vi.mock("./model-fallback.js", () => ({
@@ -159,8 +160,9 @@ vi.mock("./command/session.js", () => ({
       updatedAt: Date.now(),
       skillsSnapshot: { prompt: "", skills: [], version: 0 },
     };
+    const sessionId = state.resolvedSessionIdMock ?? "session-1";
     return {
-      sessionId: "session-1",
+      sessionId,
       sessionKey: state.resolvedSessionKeyMock ?? "agent:main:main",
       sessionEntry,
       sessionStore: state.sessionStoreMock,
@@ -1016,6 +1018,7 @@ describe("agentCommand – LiveSessionModelSwitchError retry", () => {
     state.sessionStoreMock = undefined;
     state.storePathMock = undefined;
     state.resolvedSessionKeyMock = undefined;
+    state.resolvedSessionIdMock = undefined;
     state.persistSessionEntryMock.mockImplementation(async (...args: unknown[]) => {
       const params = args[0] as {
         sessionStore?: Record<string, unknown>;
@@ -1341,6 +1344,44 @@ describe("agentCommand – LiveSessionModelSwitchError retry", () => {
     });
     expect(touchWrites).toHaveLength(1);
     expect(state.updateSessionStoreAfterAgentRunMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("resets lifecycle metadata when early session writes rotate the session id", async () => {
+    setupSingleAttemptFallback();
+    state.runAgentAttemptMock.mockResolvedValue(makeSuccessResult("openai", "gpt-5.4"));
+    setupSessionTouchStore();
+    state.resolvedSessionIdMock = "session-2";
+    const oldStartedAt = 1_000;
+    const oldEntry = state.sessionEntryMock!;
+    Object.assign(oldEntry, {
+      sessionStartedAt: oldStartedAt,
+      lastInteractionAt: oldStartedAt,
+      sessionFile: "/tmp/openclaw-sessions/old-session.jsonl",
+      status: "done",
+      startedAt: oldStartedAt,
+      endedAt: oldStartedAt + 1,
+      runtimeMs: 1,
+      abortedLastRun: true,
+    });
+
+    await runBasicAgentCommand();
+
+    const touchWrite = state.persistSessionEntryMock.mock.calls.find((call) => {
+      const entry = (call[0] as { entry?: Record<string, unknown> } | undefined)?.entry;
+      return entry?.lastInteractionAt !== undefined;
+    });
+    const entry = requireRecord(
+      (touchWrite?.[0] as { entry?: unknown } | undefined)?.entry,
+      "rotated touch entry",
+    );
+    expect(entry.sessionId).toBe("session-2");
+    expect(entry.sessionStartedAt).toBeGreaterThan(oldStartedAt);
+    expect(entry.sessionFile).toBeUndefined();
+    expect(entry.status).toBeUndefined();
+    expect(entry.startedAt).toBeUndefined();
+    expect(entry.endedAt).toBeUndefined();
+    expect(entry.runtimeMs).toBeUndefined();
+    expect(entry.abortedLastRun).toBeUndefined();
   });
 
   it("threads lifecycle ownership into normal delivery", async () => {
