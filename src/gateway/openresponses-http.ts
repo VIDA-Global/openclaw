@@ -7,6 +7,7 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { resolveIntegerOption } from "@openclaw/normalization-core/number-coercion";
 import { isClientToolNameConflictError } from "../agents/agent-tool-definition-adapter.js";
@@ -429,6 +430,7 @@ function extractUsageFromResult(result: unknown): Usage {
 }
 
 type PendingToolCall = { id: string; name: string; arguments: string };
+type AgentReplyPayload = { text?: string; mediaUrl?: string; mediaUrls?: string[] };
 
 function safeHostedOutputString(value: unknown): string {
   if (typeof value === "string") {
@@ -443,6 +445,87 @@ function safeHostedOutputString(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function imageMimeFromMediaUrl(mediaUrl: string): string | undefined {
+  const dataUrlMatch = /^data:(image\/[a-z0-9.+-]+);base64,/i.exec(mediaUrl);
+  if (dataUrlMatch?.[1]) {
+    return dataUrlMatch[1].toLowerCase();
+  }
+  const clean = mediaUrl.split(/[?#]/, 1)[0]?.toLowerCase() ?? "";
+  if (clean.endsWith(".png")) return "image/png";
+  if (clean.endsWith(".jpg") || clean.endsWith(".jpeg")) return "image/jpeg";
+  if (clean.endsWith(".webp")) return "image/webp";
+  if (clean.endsWith(".gif")) return "image/gif";
+  return undefined;
+}
+
+async function imageDataFromMediaUrl(mediaUrl: string): Promise<
+  | {
+      type: "image";
+      mimeType: string;
+      data: string;
+    }
+  | undefined
+> {
+  const mimeType = imageMimeFromMediaUrl(mediaUrl);
+  if (!mimeType) {
+    return undefined;
+  }
+  const dataUrlMatch = /^data:image\/[a-z0-9.+-]+;base64,(.+)$/is.exec(mediaUrl);
+  if (dataUrlMatch?.[1]) {
+    return { type: "image", mimeType, data: dataUrlMatch[1] };
+  }
+  try {
+    const bytes = await readFile(mediaUrl);
+    return { type: "image", mimeType, data: bytes.toString("base64") };
+  } catch (err) {
+    logWarn(`openresponses: failed to read assistant media ${mediaUrl}: ${String(err)}`);
+    return undefined;
+  }
+}
+
+async function createMediaOutputItemsFromPayloads(
+  responseId: string,
+  payloads: AgentReplyPayload[] | undefined,
+): Promise<OutputItem[]> {
+  if (!Array.isArray(payloads) || payloads.length === 0) {
+    return [];
+  }
+  const mediaUrls = [
+    ...new Set(
+      payloads.flatMap((payload) => [
+        ...(typeof payload.mediaUrl === "string" ? [payload.mediaUrl] : []),
+        ...(Array.isArray(payload.mediaUrls)
+          ? payload.mediaUrls.filter((url): url is string => typeof url === "string")
+          : []),
+      ]),
+    ),
+  ];
+  const items: OutputItem[] = [];
+  for (const [index, mediaUrl] of mediaUrls.entries()) {
+    const image = await imageDataFromMediaUrl(mediaUrl);
+    if (!image) {
+      continue;
+    }
+    const callId = `openclaw_media_${responseId}_${index}`;
+    items.push(
+      createFunctionCallOutputItem({
+        id: `call_${callId}`,
+        callId,
+        name: "openclaw_media",
+        arguments: safeHostedOutputString({ mediaUrl }),
+        status: "completed",
+      }),
+      createFunctionCallResultOutputItem({
+        id: `fco_${callId}`,
+        callId,
+        output: safeHostedOutputString(image),
+        status: "completed",
+      }),
+    );
+  }
+  return items;
 }
 
 function resolveHostedProviderMetadata(
@@ -920,7 +1003,8 @@ export async function handleOpenResponsesHttpRequest(
         return true;
       }
 
-      const payloads = (result as { payloads?: Array<{ text?: string }> } | null)?.payloads;
+      const payloads = (result as { payloads?: AgentReplyPayload[] } | null)?.payloads;
+      const mediaOutputItems = await createMediaOutputItemsFromPayloads(responseId, payloads);
       const usage = extractUsageFromResult(result);
       const meta = (result as { meta?: unknown } | null)?.meta;
       const { stopReason, pendingToolCalls } = resolveStopReasonAndPendingToolCalls(meta);
@@ -996,7 +1080,7 @@ export async function handleOpenResponsesHttpRequest(
           id: responseId,
           model,
           status: "incomplete",
-          output: [...additionalOutputItems, ...output],
+          output: [...additionalOutputItems, ...mediaOutputItems, ...output],
           usage,
         });
         rememberResponseSession();
@@ -1018,6 +1102,7 @@ export async function handleOpenResponsesHttpRequest(
         status: "completed",
         output: [
           ...additionalOutputItems,
+          ...mediaOutputItems,
           createAssistantOutputItem({
             id: outputItemId,
             text: content,
@@ -1439,7 +1524,25 @@ export async function handleOpenResponsesHttpRequest(
 
       // Check for pending client tool calls BEFORE maybeFinalize() because the
       // lifecycle:end event may already have requested finalization.
-      const resultAny = result as { payloads?: Array<{ text?: string }>; meta?: unknown };
+      const resultAny = result as { payloads?: AgentReplyPayload[]; meta?: unknown };
+      const mediaOutputItems = await createMediaOutputItemsFromPayloads(
+        responseId,
+        resultAny.payloads,
+      );
+      for (const item of mediaOutputItems) {
+        const outputIndex = reserveAdditionalOutputIndex();
+        writeSseEvent(res, {
+          type: "response.output_item.added",
+          output_index: outputIndex,
+          item,
+        });
+        additionalOutputItems.push(item);
+        writeSseEvent(res, {
+          type: "response.output_item.done",
+          output_index: outputIndex,
+          item,
+        });
+      }
       const resultPayloadText = Array.isArray(resultAny.payloads)
         ? resultAny.payloads
             .map((p) => (typeof p.text === "string" ? p.text : ""))

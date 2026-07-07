@@ -2,6 +2,7 @@
 // response-session lookup, limits, auth scopes, and provider error mapping.
 import fs from "node:fs/promises";
 import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createClientToolNameConflictError } from "../agents/agent-tool-definition-adapter.js";
@@ -194,6 +195,13 @@ const WEATHER_TOOL = [
     description: "Get weather",
   },
 ] as const;
+
+async function createTempPng(bytes = Buffer.from("png")) {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-openresponses-media-"));
+  const filePath = path.join(dir, "shot.png");
+  await fs.writeFile(filePath, bytes);
+  return filePath;
+}
 
 function buildUrlInputMessage(params: {
   kind: "input_file" | "input_image";
@@ -1817,6 +1825,88 @@ describe("OpenResponses HTTP API (e2e)", () => {
       call_id: "call_read_1",
       output: '{"content":[{"type":"text","text":"file contents"}]}',
       status: "completed",
+    });
+  });
+
+  it("preserves assistant media payloads as hosted tool-result image data", async () => {
+    const port = enabledPort;
+    const imageBytes = Buffer.from("png");
+    const imagePath = await createTempPng(imageBytes);
+    agentCommand.mockClear();
+    agentCommand.mockResolvedValueOnce({
+      payloads: [{ text: "Screenshot attached.", mediaUrls: [imagePath] }],
+    } as never);
+
+    const res = await postResponses(port, {
+      stream: false,
+      model: "openclaw",
+      input: "show me a screenshot",
+    });
+
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { output?: Array<Record<string, unknown>> };
+    const mediaCall = json.output?.find(
+      (item) => item.type === "function_call" && item.name === "openclaw_media",
+    );
+    expect(mediaCall).toMatchObject({
+      type: "function_call",
+      name: "openclaw_media",
+      status: "completed",
+    });
+
+    const mediaResult = json.output?.find(
+      (item) => item.type === "function_call_output" && item.call_id === mediaCall?.call_id,
+    );
+    expect(mediaResult).toMatchObject({
+      type: "function_call_output",
+      status: "completed",
+    });
+    expect(JSON.parse(String(mediaResult?.output))).toEqual({
+      type: "image",
+      mimeType: "image/png",
+      data: imageBytes.toString("base64"),
+    });
+    expect(json.output?.at(-1)).toMatchObject({
+      type: "message",
+      content: [{ type: "output_text", text: "Screenshot attached." }],
+    });
+  });
+
+  it("streams assistant media payloads as hosted tool-result image data", async () => {
+    const port = enabledPort;
+    const imageBytes = Buffer.from("stream-png");
+    const imagePath = await createTempPng(imageBytes);
+    agentCommand.mockClear();
+    agentCommand.mockResolvedValueOnce({
+      payloads: [{ text: "Screenshot attached.", mediaUrls: [imagePath] }],
+    } as never);
+
+    const res = await postResponses(port, {
+      stream: true,
+      model: "openclaw",
+      input: "show me a screenshot",
+    });
+
+    expect(res.status).toBe(200);
+    const events = parseSseEvents(await res.text());
+    const doneItems = events
+      .filter((event) => event.event === "response.output_item.done")
+      .map((event) => (parseSseData(event) as { item?: Record<string, unknown> }).item)
+      .filter(Boolean);
+    const mediaCall = doneItems.find(
+      (item) => item?.type === "function_call" && item.name === "openclaw_media",
+    );
+    const mediaResult = doneItems.find(
+      (item) => item?.type === "function_call_output" && item.call_id === mediaCall?.call_id,
+    );
+    expect(mediaResult).toMatchObject({
+      type: "function_call_output",
+      status: "completed",
+    });
+    expect(JSON.parse(String(mediaResult?.output))).toEqual({
+      type: "image",
+      mimeType: "image/png",
+      data: imageBytes.toString("base64"),
     });
   });
 
