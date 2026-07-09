@@ -80,10 +80,7 @@ state, or when the target release intentionally has no retained fork commits.
 
 Current retained OpenClaw fork areas:
 
-- hosted `/v1/responses` compatibility for `vida.live`, including the retained VIDA
-  reasoning pass-through behavior from `de531f20222` (`fixed reasoning level pass-thru`):
-  map OpenResponses `reasoning.effort` to OpenClaw `thinkingOnce` for that one request
-  while preserving configured model/session defaults when effort is omitted;
+- hosted `/v1/responses` compatibility for `vida.live`;
 - plugin-owned VIDA OpenAI request attribution;
 - WhatsApp VIDA session compatibility;
 - release workflow docs/scripts and README fork deltas.
