@@ -577,6 +577,7 @@ async function runResponsesAgentCommand(params: {
   clientTools: ClientToolDefinition[];
   extraSystemPrompt: string;
   modelOverride?: string;
+  thinkingOnce?: string;
   streamParams: { maxTokens?: number; temperature?: number; topP?: number } | undefined;
   providerMetadata?: Record<string, unknown>;
   toolResultMaxDataBytes?: number;
@@ -605,6 +606,7 @@ async function runResponsesAgentCommand(params: {
       clientTools: params.clientTools.length > 0 ? params.clientTools : undefined,
       extraSystemPrompt: params.extraSystemPrompt || undefined,
       model: params.modelOverride,
+      thinkingOnce: params.thinkingOnce,
       streamParams: params.streamParams ?? undefined,
       providerMetadata: params.providerMetadata,
       toolResultMaxDataBytes: params.toolResultMaxDataBytes,
@@ -623,6 +625,10 @@ async function runResponsesAgentCommand(params: {
     defaultRuntime,
     params.deps,
   );
+}
+
+function normalizeResponsesReasoningEffort(effort: unknown): string | undefined {
+  return effort === "low" || effort === "medium" || effort === "high" ? effort : undefined;
 }
 
 export async function handleOpenResponsesHttpRequest(
@@ -927,6 +933,10 @@ export async function handleOpenResponsesHttpRequest(
     typeof opts.config?.toolResultMaxDataBytes === "number"
       ? opts.config.toolResultMaxDataBytes
       : undefined;
+  // VIDA's OpenResponses gateway clients send reasoning.effort as a per-request
+  // thinking override. Keep this one-shot so model/session defaults still apply
+  // when the field is omitted.
+  const thinkingOnce = normalizeResponsesReasoningEffort(payload.reasoning?.effort);
   const reasoningLevel = payload.reasoning ? ("stream" as const) : undefined;
   const reasoningSummary = payload.reasoning?.summary;
 
@@ -960,6 +970,7 @@ export async function handleOpenResponsesHttpRequest(
         clientTools: resolvedClientTools,
         extraSystemPrompt,
         modelOverride,
+        thinkingOnce,
         streamParams,
         providerMetadata,
         toolResultMaxDataBytes,
@@ -1504,6 +1515,7 @@ export async function handleOpenResponsesHttpRequest(
         clientTools: resolvedClientTools,
         extraSystemPrompt,
         modelOverride,
+        thinkingOnce,
         streamParams,
         providerMetadata,
         toolResultMaxDataBytes,

@@ -592,8 +592,22 @@ describe("OpenResponses HTTP API (e2e)", () => {
       expect(optsProviderMetadata.providerMetadata).toEqual({
         vida: { ignoreOnProviderRelay: true, reasoningEffort: "high" },
       });
+      expect(optsProviderMetadata.thinkingOnce).toBe("high");
       expect(optsProviderMetadata.reasoningLevel).toBe("stream");
       await ensureResponseConsumed(resProviderMetadata);
+
+      agentCommand.mockClear();
+      agentCommand.mockResolvedValueOnce({ payloads: [{ text: "ok" }] } as never);
+      const resReasoningSummaryOnly = await postResponses(port, {
+        model: "openclaw",
+        input: "hi",
+        reasoning: { summary: "auto" },
+      });
+      expect(resReasoningSummaryOnly.status).toBe(200);
+      const optsReasoningSummaryOnly = firstAgentOpts();
+      expect(optsReasoningSummaryOnly.thinkingOnce).toBeUndefined();
+      expect(optsReasoningSummaryOnly.reasoningLevel).toBe("stream");
+      await ensureResponseConsumed(resReasoningSummaryOnly);
 
       agentCommand.mockClear();
       agentCommand.mockResolvedValueOnce({ payloads: [{ text: "ok" }] } as never);
