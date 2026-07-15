@@ -24,7 +24,9 @@ describe("request attribution fetch wrapper", () => {
       res.end(JSON.stringify({ ok: true }));
     });
 
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", () => resolve());
+    });
     const address = server.address();
     const port = typeof address === "object" && address ? address.port : 0;
     process.env.VIDA_API_BASE_URL = `http://127.0.0.1:${port}`;
@@ -42,9 +44,15 @@ describe("request attribution fetch wrapper", () => {
         },
       );
     } finally {
-      await new Promise<void>((resolve, reject) =>
-        server.close((err) => (err ? reject(err) : resolve())),
-      );
+      await new Promise<void>((resolve, reject) => {
+        server.close((err) => {
+          if (err) {
+            reject(err);
+            return;
+          }
+          resolve();
+        });
+      });
     }
 
     expect(seen).toHaveLength(2);

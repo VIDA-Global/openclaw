@@ -19,6 +19,12 @@ import {
 } from "./client.js";
 
 describe("browser client", () => {
+  function jsonResponse(body: unknown): Response {
+    return new Response(JSON.stringify(body), {
+      headers: { "content-type": "application/json" },
+    });
+  }
+
   function requireSnapshotCall(calls: string[]): string {
     const call = calls.find((url) => url.includes("/snapshot?"));
     if (!call) {
@@ -32,16 +38,13 @@ describe("browser client", () => {
       "fetch",
       vi.fn(async (url: string) => {
         calls.push(url);
-        return {
+        return jsonResponse({
           ok: true,
-          json: async () => ({
-            ok: true,
-            format: "ai",
-            targetId: "t1",
-            url: "https://x",
-            snapshot: "ok",
-          }),
-        } as unknown as Response;
+          format: "ai",
+          targetId: "t1",
+          url: "https://x",
+          snapshot: "ok",
+        });
       }),
     );
   }
@@ -72,13 +75,12 @@ describe("browser client", () => {
     const fetch = vi
       .fn()
       .mockRejectedValueOnce(new Error("timed out"))
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
+      .mockResolvedValueOnce(
+        jsonResponse({
           running: true,
           tabs: [{ targetId: "t1", title: "Tab", url: "https://example.com", type: "page" }],
         }),
-      } as unknown as Response);
+      );
     vi.stubGlobal("fetch", fetch);
 
     await expect(browserTabs("http://127.0.0.1:18791", { retryDelayMs: 0 })).resolves.toHaveLength(
@@ -88,14 +90,7 @@ describe("browser client", () => {
   });
 
   it("surfaces non-2xx responses with body text", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: false,
-        status: 409,
-        text: async () => "conflict",
-      } as unknown as Response),
-    );
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("conflict", { status: 409 })));
 
     await expect(
       browserSnapshot("http://127.0.0.1:18791", { format: "aria", limit: 1 }),
@@ -194,135 +189,111 @@ describe("browser client", () => {
       vi.fn(async (url: string, init?: RequestInit & { timeoutMs?: number }) => {
         calls.push({ url, init });
         if (url.endsWith("/tabs") && (!init || init.method === undefined)) {
-          return {
-            ok: true,
-            json: async () => ({
-              running: true,
-              tabs: [{ targetId: "t1", title: "T", url: "https://x" }],
-            }),
-          } as unknown as Response;
+          return jsonResponse({
+            running: true,
+            tabs: [{ targetId: "t1", title: "T", url: "https://x" }],
+          });
         }
         if (url.endsWith("/tabs/open")) {
-          return {
-            ok: true,
-            json: async () => ({
-              targetId: "t2",
-              title: "N",
-              url: "https://y",
-            }),
-          } as unknown as Response;
+          return jsonResponse({
+            targetId: "t2",
+            title: "N",
+            url: "https://y",
+          });
         }
         if (url.endsWith("/navigate")) {
-          return {
+          return jsonResponse({
             ok: true,
-            json: async () => ({
-              ok: true,
-              targetId: "t1",
-              url: "https://y",
-            }),
-          } as unknown as Response;
+            targetId: "t1",
+            url: "https://y",
+            download: {
+              url: "https://y/report.csv",
+              suggestedFilename: "report.csv",
+              path: "/tmp/openclaw/downloads/report.csv",
+            },
+          });
         }
         if (url.endsWith("/act")) {
-          return {
+          return jsonResponse({
             ok: true,
-            json: async () => ({
-              ok: true,
-              targetId: "t1",
-              url: "https://x",
-              result: 1,
-              results: [{ ok: true }],
-            }),
-          } as unknown as Response;
+            targetId: "t1",
+            url: "https://x",
+            result: 1,
+            results: [{ ok: true }],
+            downloads: [
+              {
+                url: "https://x/report.pdf",
+                suggestedFilename: "report.pdf",
+                path: "/tmp/openclaw/downloads/report.pdf",
+              },
+            ],
+          });
         }
         if (url.endsWith("/hooks/file-chooser")) {
-          return {
-            ok: true,
-            json: async () => ({ ok: true }),
-          } as unknown as Response;
+          return jsonResponse({ ok: true });
         }
         if (url.endsWith("/hooks/dialog")) {
-          return {
-            ok: true,
-            json: async () => ({ ok: true }),
-          } as unknown as Response;
+          return jsonResponse({ ok: true });
         }
         if (url.includes("/console?")) {
-          return {
+          return jsonResponse({
             ok: true,
-            json: async () => ({
-              ok: true,
-              targetId: "t1",
-              messages: [],
-            }),
-          } as unknown as Response;
+            targetId: "t1",
+            messages: [],
+          });
         }
         if (url.endsWith("/pdf")) {
-          return {
+          return jsonResponse({
             ok: true,
-            json: async () => ({
-              ok: true,
-              path: "/tmp/a.pdf",
-              targetId: "t1",
-              url: "https://x",
-            }),
-          } as unknown as Response;
+            path: "/tmp/a.pdf",
+            targetId: "t1",
+            url: "https://x",
+          });
         }
         if (url.endsWith("/screenshot")) {
-          return {
+          return jsonResponse({
             ok: true,
-            json: async () => ({
-              ok: true,
-              path: "/tmp/a.png",
-              targetId: "t1",
-              url: "https://x",
-            }),
-          } as unknown as Response;
+            path: "/tmp/a.png",
+            targetId: "t1",
+            url: "https://x",
+          });
         }
         if (url.includes("/snapshot?")) {
-          return {
+          return jsonResponse({
             ok: true,
-            json: async () => ({
-              ok: true,
-              format: "aria",
-              targetId: "t1",
-              url: "https://x",
-              nodes: [],
-            }),
-          } as unknown as Response;
+            format: "aria",
+            targetId: "t1",
+            url: "https://x",
+            nodes: [],
+          });
         }
         if (url.includes("/doctor")) {
-          return {
+          return jsonResponse({
             ok: true,
-            json: async () => ({
-              ok: true,
-              profile: "openclaw",
-              transport: "cdp",
-              checks: [],
-              status: {
-                enabled: true,
-                running: true,
-                cdpPort: 18792,
-              },
-            }),
-          } as unknown as Response;
+            profile: "openclaw",
+            transport: "cdp",
+            checks: [],
+            status: {
+              enabled: true,
+              running: true,
+              cdpPort: 18792,
+            },
+          });
         }
-        return {
-          ok: true,
-          json: async () => ({
-            enabled: true,
-            running: true,
-            pid: 1,
-            cdpPort: 18792,
-            cdpUrl: "http://127.0.0.1:18792",
-            chosenBrowser: "chrome",
-            userDataDir: "/tmp",
-            color: "#FF4500",
-            headless: false,
-            noSandbox: false,
-            executablePath: null,
-            attachOnly: false,
-          }),
-        } as unknown as Response;
+        return jsonResponse({
+          enabled: true,
+          running: true,
+          pid: 1,
+          cdpPort: 18792,
+          cdpUrl: "http://127.0.0.1:18792",
+          chosenBrowser: "chrome",
+          userDataDir: "/tmp",
+          color: "#FF4500",
+          headless: false,
+          noSandbox: false,
+          executablePath: null,
+          attachOnly: false,
+        });
       }),
     );
 
@@ -357,11 +328,23 @@ describe("browser client", () => {
     });
     expect(navigation.ok).toBe(true);
     expect(navigation.targetId).toBe("t1");
+    expect(navigation.download).toEqual({
+      url: "https://y/report.csv",
+      suggestedFilename: "report.csv",
+      path: "/tmp/openclaw/downloads/report.csv",
+    });
 
     const act = await browserAct("http://127.0.0.1:18791", { kind: "click", ref: "1" });
     expect(act.ok).toBe(true);
     expect(act.targetId).toBe("t1");
     expect(act.results).toEqual([{ ok: true }]);
+    expect(act.downloads).toEqual([
+      {
+        url: "https://x/report.pdf",
+        suggestedFilename: "report.pdf",
+        path: "/tmp/openclaw/downloads/report.pdf",
+      },
+    ]);
 
     const fileChooser = await browserArmFileChooser("http://127.0.0.1:18791", {
       paths: ["/tmp/a.txt"],
@@ -431,10 +414,7 @@ describe("browser client", () => {
       "fetch",
       vi.fn(async (url: string, init?: RequestInit & { timeoutMs?: number }) => {
         calls.push({ url, init });
-        return {
-          ok: true,
-          json: async () => ({ ok: true, targetId: "t1" }),
-        } as unknown as Response;
+        return jsonResponse({ ok: true, targetId: "t1" });
       }),
     );
 
@@ -457,10 +437,7 @@ describe("browser client", () => {
       "fetch",
       vi.fn(async (url: string, init?: RequestInit & { timeoutMs?: number }) => {
         calls.push({ url, init });
-        return {
-          ok: true,
-          json: async () => ({ ok: true, targetId: "t1", path: "/tmp/a.png" }),
-        } as unknown as Response;
+        return jsonResponse({ ok: true, targetId: "t1", path: "/tmp/a.png" });
       }),
     );
 

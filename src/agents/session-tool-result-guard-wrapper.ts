@@ -10,8 +10,15 @@ import {
   type InputProvenance,
 } from "../sessions/input-provenance.js";
 import {
+  attachRuntimeUserTurnTranscriptRecorder,
+  takeRuntimeUserTurnTranscriptContext,
+  takeRuntimeUserTurnTranscriptRecorder,
+} from "../sessions/user-turn-transcript-runtime-context.js";
+import {
   mergePreparedUserTurnMessageForRuntime,
+  restorePreparedUserTurnOperationalMetaForRuntime,
   type PersistedUserTurnMessage,
+  type UserTurnTranscriptRecorder,
 } from "../sessions/user-turn-transcript.js";
 import { resolveLiveToolResultMaxChars } from "./embedded-agent-runner/tool-result-truncation.js";
 import type { AgentMessage } from "./runtime/index.js";
@@ -49,6 +56,7 @@ export function guardSessionManager(
     onUserMessagePersisted?: (
       message: Extract<AgentMessage, { role: "user" }>,
     ) => void | Promise<void>;
+    onUserMessageBlocked?: (message: Extract<AgentMessage, { role: "user" }>) => void;
     onMessagePersisted?: (message: AgentMessage) => void | Promise<void>;
     withCompactionPersistence?: (
       append: () => string,
@@ -65,6 +73,7 @@ export function guardSessionManager(
 
   const hookRunner = getGlobalHookRunner();
   let pendingPreparedUserTurnMessage = opts?.preparedUserTurnMessage;
+  let queuedUserTurnTranscriptRecorder: UserTurnTranscriptRecorder | undefined;
   const applyProviderMetadata = (message: AgentMessage): AgentMessage => {
     const providerMetadata = opts?.providerMetadata;
     if (!providerMetadata || Object.keys(providerMetadata).length === 0) {
@@ -73,14 +82,13 @@ export function guardSessionManager(
     const record = message as AgentMessage & {
       providerMetadata?: Record<string, unknown>;
     };
-    const merged = {
+    return {
       ...(record as unknown as Record<string, unknown>),
       providerMetadata: {
-        ...(record.providerMetadata ?? {}),
+        ...record.providerMetadata,
         ...providerMetadata,
       },
-    };
-    return merged as unknown as AgentMessage;
+    } as unknown as AgentMessage;
   };
   const beforeMessageWrite = (event: { message: AgentMessage }) => {
     let message = event.message;
@@ -91,10 +99,15 @@ export function guardSessionManager(
         sessionKey: opts?.sessionKey,
       });
       if (result?.block) {
+        queuedUserTurnTranscriptRecorder?.markBlocked();
+        queuedUserTurnTranscriptRecorder = undefined;
         return result;
       }
       if (result?.message) {
-        message = result.message;
+        message = restorePreparedUserTurnOperationalMetaForRuntime({
+          runtimeMessage: result.message,
+          ...(event.message.role === "user" ? { preparedMessage: event.message } : {}),
+        });
         changed = true;
       }
     }
@@ -102,6 +115,14 @@ export function guardSessionManager(
     if (redacted !== message) {
       message = redacted;
       changed = true;
+    }
+    if (message.role !== "user" && queuedUserTurnTranscriptRecorder) {
+      queuedUserTurnTranscriptRecorder.markBlocked();
+      queuedUserTurnTranscriptRecorder = undefined;
+    }
+    if (message.role === "user" && queuedUserTurnTranscriptRecorder) {
+      message = attachRuntimeUserTurnTranscriptRecorder(message, queuedUserTurnTranscriptRecorder);
+      queuedUserTurnTranscriptRecorder = undefined;
     }
     const withProviderMetadata = applyProviderMetadata(message);
     if (withProviderMetadata !== message) {
@@ -138,14 +159,20 @@ export function guardSessionManager(
     sessionKey: opts?.sessionKey,
     agentId: opts?.agentId,
     transformMessageForPersistence: (message) => {
+      queuedUserTurnTranscriptRecorder = undefined;
       const withProvenance = applyInputProvenanceToUserMessage(message, opts?.inputProvenance);
-      const prepared = pendingPreparedUserTurnMessage;
+      const runtimeContext = takeRuntimeUserTurnTranscriptContext(message);
+      const prepared = runtimeContext?.message ?? pendingPreparedUserTurnMessage;
       const merged = mergePreparedUserTurnMessageForRuntime({
         runtimeMessage: withProvenance,
         ...(prepared ? { preparedMessage: prepared } : {}),
       });
       if (merged !== withProvenance) {
-        pendingPreparedUserTurnMessage = undefined;
+        if (runtimeContext) {
+          queuedUserTurnTranscriptRecorder = runtimeContext.recorder;
+        } else {
+          pendingPreparedUserTurnMessage = undefined;
+        }
       }
       return applyProviderMetadata(merged);
     },
@@ -168,7 +195,12 @@ export function guardSessionManager(
     suppressAssistantErrorPersistence: opts?.suppressAssistantErrorPersistence,
     onMessagePersisted: opts?.onMessagePersisted,
     withCompactionPersistence: opts?.withCompactionPersistence,
-    onUserMessagePersisted: opts?.onUserMessagePersisted,
+    onUserMessagePersisted: async (message) => {
+      const recorder = takeRuntimeUserTurnTranscriptRecorder(message);
+      recorder?.markRuntimePersisted(message);
+      await opts?.onUserMessagePersisted?.(message);
+    },
+    onUserMessageBlocked: opts?.onUserMessageBlocked,
     onAssistantErrorMessagePersisted: opts?.onAssistantErrorMessagePersisted,
   });
   (sessionManager as GuardedSessionManager).flushPendingToolResults = guard.flushPendingToolResults;

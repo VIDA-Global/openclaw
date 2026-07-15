@@ -441,9 +441,9 @@ function safeHostedOutputString(value: unknown): string {
   }
   try {
     const text = JSON.stringify(value);
-    return typeof text === "string" ? text : String(value);
+    return typeof text === "string" ? text : "";
   } catch {
-    return String(value);
+    return "[unserializable output]";
   }
 }
 
@@ -453,10 +453,18 @@ function imageMimeFromMediaUrl(mediaUrl: string): string | undefined {
     return dataUrlMatch[1].toLowerCase();
   }
   const clean = mediaUrl.split(/[?#]/, 1)[0]?.toLowerCase() ?? "";
-  if (clean.endsWith(".png")) return "image/png";
-  if (clean.endsWith(".jpg") || clean.endsWith(".jpeg")) return "image/jpeg";
-  if (clean.endsWith(".webp")) return "image/webp";
-  if (clean.endsWith(".gif")) return "image/gif";
+  if (clean.endsWith(".png")) {
+    return "image/png";
+  }
+  if (clean.endsWith(".jpg") || clean.endsWith(".jpeg")) {
+    return "image/jpeg";
+  }
+  if (clean.endsWith(".webp")) {
+    return "image/webp";
+  }
+  if (clean.endsWith(".gif")) {
+    return "image/gif";
+  }
   return undefined;
 }
 

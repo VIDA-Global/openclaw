@@ -51,8 +51,8 @@ retained commits have been added and validated:
 ```sh
 cd /home/lylepratt/workspace/openclaw
 scripts/sync-upstream-release.sh \
-  --tag v2026.6.10 \
-  --branch release-sync/v2026.6.10-vida \
+  --tag v2026.7.1 \
+  --branch release-sync/v2026.7.1-vida \
   --no-fork-tag \
   --no-push
 ```
@@ -60,10 +60,10 @@ scripts/sync-upstream-release.sh \
 Then add the retained VIDA commits on that branch, validate, and create the fork tag manually:
 
 ```sh
-git tag -a vida-v2026.6.10 -m "VIDA fork release aligned with upstream v2026.6.10"
-git push -u origin release-sync/v2026.6.10-vida
-git push origin vida-v2026.6.10
-scripts/verify-vida-release.sh --fork-tag vida-v2026.6.10
+git tag -a vida-v2026.7.1 -m "VIDA fork release aligned with upstream v2026.7.1"
+git push -u origin release-sync/v2026.7.1-vida
+git push origin vida-v2026.7.1
+scripts/verify-vida-release.sh --fork-tag vida-v2026.7.1
 ```
 
 Default `scripts/sync-upstream-release.sh` behavior:

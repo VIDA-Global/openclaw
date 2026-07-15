@@ -48,7 +48,9 @@ function resolveBrowserClientTimeoutMs(
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 function resolveBrowserClientRetryCount(opts: BrowserClientTimeoutOptions | undefined): number {
@@ -132,7 +134,7 @@ export type ProfileStatus = {
   cdpPort: number | null;
   cdpUrl: string | null;
   color: string;
-  driver: "openclaw" | "existing-session";
+  driver: "openclaw" | "existing-session" | "extension";
   running: boolean;
   tabCount: number;
   isDefault: boolean;

@@ -97,7 +97,7 @@ Model note: while many providers and models are supported, prefer a current flag
 
 ## Install (recommended)
 
-Runtime: **Node 24 (recommended) or Node 22.19+**.
+Runtime: **Node 24.15+ (recommended), Node 22.22.3+, or Node 25.9+**.
 
 ```bash
 npm install -g openclaw@latest
@@ -110,7 +110,7 @@ OpenClaw Onboard installs the Gateway daemon (launchd/systemd user service) so i
 
 ## Quick start (TL;DR)
 
-Runtime: **Node 24 (recommended) or Node 22.19+**.
+Runtime: **Node 24.15+ (recommended), Node 22.22.3+, or Node 25.9+**.
 
 Full beginner guide (auth, pairing, channels): [Getting started](https://docs.openclaw.ai/start/getting-started)
 
@@ -143,7 +143,7 @@ openclaw agent --message "Ship checklist" --thinking high
 This repository tracks upstream OpenClaw releases and keeps a small set of VIDA-specific patches.
 Treat this section as the preservation contract for future upstream merges and release-tag syncs.
 
-Current upstream base for this fork line: `v2026.6.10`.
+Current upstream base for this fork line: `v2026.7.1`.
 
 Release-tag sync rule:
 
@@ -155,8 +155,8 @@ Release-tag sync rule:
 Useful audit commands:
 
 ```sh
-git log --oneline v2026.6.10..HEAD
-git diff v2026.6.10...HEAD
+git log --oneline v2026.7.1..HEAD
+git diff v2026.7.1...HEAD
 ```
 
 ### Product/runtime deltas
@@ -357,6 +357,9 @@ by Peter Steinberger and the community.
 ## Community
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines, maintainers, and how to submit PRs.
+Use the [issue chooser](https://github.com/openclaw/openclaw/issues/new/choose) for bugs, docs bugs, and feature requests;
+ask setup/support questions in [Discord](https://discord.gg/clawd); and report vulnerabilities through [SECURITY.md](SECURITY.md).
+PRs should link the relevant issue when possible and follow the [PR template](.github/pull_request_template.md) with problem, impact, and evidence.
 AI/vibe-coded PRs welcome! 🤖
 
 Special thanks to [Mario Zechner](https://mariozechner.at/) for his support and for
